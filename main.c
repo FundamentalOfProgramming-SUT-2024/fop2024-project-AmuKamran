@@ -46,7 +46,8 @@ typedef struct {
     Room rooms[MAX_ROOMS];
     int room_count;
     int stairs_x, stairs_y;
-     int prev_room_width; 
+    int battle_gate_x, battle_gate_y;
+    int prev_room_width; 
     int prev_room_height;
 } Map;
 
@@ -87,6 +88,10 @@ void draw_map();
 void game_play();
 void discover_current_room(int px, int py);
 void place_door(Room *room); 
+void create_random_branch(int x, int y);
+void add_corridor_walls(int x, int y);
+void create_winding_corridor(int x1, int y1, int x2, int y2);
+void enter_battle();
 
 
 int main() {
@@ -829,11 +834,11 @@ void generate_map(bool keep_dimensions) {
         }
     }
 
-    // ایجاد آرایه برای الگوریتم MST
+ // ایجاد آرایه برای الگوریتم MST
     int connections[MAX_ROOMS] = {0};
     int costs[MAX_ROOMS][MAX_ROOMS] = {0};
 
-    // محاسبه هزینه اتصال بین اتاق‌ها
+    // محاسبه هزینه اتصالات
     for (int i = 0; i < current_map.room_count; i++) {
         for (int j = i+1; j < current_map.room_count; j++) {
             int x1 = current_map.rooms[i].x + current_map.rooms[i].width/2;
@@ -845,7 +850,7 @@ void generate_map(bool keep_dimensions) {
         }
     }
 
-    // الگوریتم Prim برای MST
+    // الگوریتم Prim با راهروهای پیچیده
     int selected[MAX_ROOMS] = {0};
     selected[0] = 1;
     
@@ -867,7 +872,6 @@ void generate_map(bool keep_dimensions) {
         
         if (from != -1 && to != -1) {
             selected[to] = 1;
-            // اتصال اتاق‌ها
             Room prev = current_map.rooms[from];
             Room current = current_map.rooms[to];
             
@@ -876,22 +880,8 @@ void generate_map(bool keep_dimensions) {
             int x2 = current.x + current.width/2;
             int y2 = current.y + current.height/2;
             
-            // ایجاد راهرو افقی
-            while (x1 != x2) {
-                if (current_map.tiles[y1][x1] == '#') {
-                    current_map.tiles[y1][x1] = '.';
-                }
-                x1 += (x1 < x2) ? 1 : -1;
-            }
-            
-            // ایجاد راهرو عمودی
-            while (y1 != y2) {
-                if (current_map.tiles[y1][x1] == '#') {
-                    current_map.tiles[y1][x1] = '.';
-                }
-                y1 += (y1 < y2) ? 1 : -1;
-            }
-            
+            // ایجاد راهرو پیچدرپیچ
+            create_winding_corridor(x1, y1, x2, y2);
             place_door(&prev);
             place_door(&current);
         }
@@ -973,7 +963,18 @@ void generate_map(bool keep_dimensions) {
     current_map.stairs_x = last_room.x + last_room.width/2;
     current_map.stairs_y = last_room.y + last_room.height/2;
     current_map.tiles[current_map.stairs_y][current_map.stairs_x] = '>';
+    // قرار دادن تله
+    int battle_room_index;
+    do {
+        battle_room_index = rand() % current_map.room_count;
+    } while (battle_room_index == current_map.room_count-1); // اتاق پله نباشد
+
+    Room battle_room = current_map.rooms[battle_room_index];
+    current_map.battle_gate_x = battle_room.x + battle_room.width/2;
+    current_map.battle_gate_y = battle_room.y + battle_room.height/2;
+    current_map.tiles[current_map.battle_gate_y][current_map.battle_gate_x] = '^';
 }
+
 // تابع نمایش نقشه
 void draw_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
@@ -983,7 +984,7 @@ void draw_map() {
                 mvaddch(y+2, x, current_map.tiles[y][x]);
                 attroff(COLOR_PAIR(1));
             } else {
-                mvaddch(y, x, ' ');
+                mvaddch(y+2, x, ' ');
             }
         }
     }
@@ -991,6 +992,7 @@ void draw_map() {
 
 // ============Game_Play============
 void game_play() {
+    init_pair(4, COLOR_CYAN, COLOR_BLACK); 
     initscr();
     cbreak();
     noecho();
@@ -1028,7 +1030,25 @@ void game_play() {
             player.x = new_x;
             player.y = new_y;
             current_map.discovered[new_y][new_x] = true;
+                    // اگر در راهرو هستیم، ۳ خانه بعدی را کشف کن
+            if (current_map.tiles[new_y][new_x] == '.') {
+                for (int step = 1; step <= 3; step++) {
+                    int next_x = player.x + (dx * step);
+                    int next_y = player.y + (dy * step);
+                    
+                    // بررسی مرزهای نقشه
+                   if (next_x >= 0 && next_x < MAP_WIDTH && 
+                        next_y >= 0 && next_y < MAP_HEIGHT &&
+                        current_map.tiles[next_y][next_x] == '.') {
+                        current_map.discovered[next_y][next_x] = true;
+                    }
+                    else {
+                        break; // اگر به دیوار رسیدیم ادامه ندهیم
+                    }
+                }
+            }
         }
+        
         if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
             // پیدا کردن اتاق فعلی
             Room current_room;
@@ -1064,6 +1084,11 @@ void game_play() {
             player.x = (player.x > new_room.x + new_room.width - 2) ? new_room.x + new_room.width - 2 : player.x;
             player.y = (player.y < new_room.y + 1) ? new_room.y + 1 : player.y;
             player.y = (player.y > new_room.y + new_room.height - 2) ? new_room.y + new_room.height - 2 : player.y;
+        }
+         if (player.x == current_map.battle_gate_x && player.y == current_map.battle_gate_y) {
+            clear();
+            enter_battle();
+            generate_map(false);
         }
     
 
@@ -1112,3 +1137,136 @@ void discover_current_room(int px, int py) {
         }
     }
 }
+void enter_battle() {
+    // ذخیره موقعیت قبلی بازیکن
+    int prev_x = player.x;
+    int prev_y = player.y;
+
+    // ایجاد پنجره جدید برای نبرد
+    WINDOW *battle_win = newwin(24, 80, 0, 0);
+    keypad(battle_win, TRUE);
+
+    // ایجاد اتاق نبرد
+    init_map();
+    int center_x = MAP_WIDTH/2;
+    int center_y = MAP_HEIGHT/2;
+    Room battle_room = {center_x-7, center_y-7, 15, 15};
+    create_room(battle_room);
+    
+    // تنظیم موقعیت بازیکن
+    player.x = center_x;
+    player.y = center_y;
+
+    bool battle_over = false;
+    while (!battle_over) {
+        wclear(battle_win);
+        box(battle_win, 0, 0);
+        
+        // رسم اتاق نبرد
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (current_map.tiles[y][x] == '*') {
+                    mvwaddch(battle_win, y, x, '*');
+                }
+            }
+        }
+        
+        // رسم بازیکن
+        mvwaddch(battle_win, player.y, player.x, '@');
+        
+        // دریافت ورودی
+        int ch = wgetch(battle_win);
+        switch(ch) {
+            case 'q':
+                battle_over = true;
+                break;
+            case KEY_LEFT:  if (current_map.tiles[player.y][player.x-1] == '*') player.x--; break;
+            case KEY_RIGHT: if (current_map.tiles[player.y][player.x+1] == '*') player.x++; break;
+            case KEY_UP:    if (current_map.tiles[player.y-1][player.x] == '*') player.y--; break;
+            case KEY_DOWN:  if (current_map.tiles[player.y+1][player.x] == '*') player.y++; break;
+        }
+        
+        wrefresh(battle_win);
+    }
+
+    // بازگردانی موقعیت قبلی
+    player.x = prev_x;
+    player.y = prev_y;
+    delwin(battle_win);
+    
+    // بازسازی رابط اصلی
+    clear();
+    refresh();
+    return;
+}
+void create_winding_corridor(int x1, int y1, int x2, int y2) {
+        int current_x = x1;
+        int current_y = y1;
+        int steps_since_turn = 0;
+        
+        while (current_x != x2 || current_y != y2) {
+            // 60% احتمال حرکت به سمت هدف پس از 3 قدم مستقیم
+            if ((rand() % 100 < 60 || steps_since_turn > 3) && 
+                (current_x != x2 || current_y != y2)) {
+                
+                if (rand() % 2 == 0 && current_x != x2) {
+                    current_x += (current_x < x2) ? 1 : -1;
+                } else if (current_y != y2) {
+                    current_y += (current_y < y2) ? 1 : -1;
+                }
+                steps_since_turn++;
+            } else {
+                // تغییر جهت تصادفی
+                int dir = rand() % 4;
+                switch(dir) {
+                    case 0: if (current_x < MAP_WIDTH-2) current_x++; break;
+                    case 1: if (current_x > 1) current_x--; break;
+                    case 2: if (current_y < MAP_HEIGHT-2) current_y++; break;
+                    case 3: if (current_y > 1) current_y--; break;
+                }
+                steps_since_turn = 0;
+            }
+            
+            // ایجاد راهرو با دیوارهای جانبی
+            if (current_map.tiles[current_y][current_x] == '#') {
+                current_map.tiles[current_y][current_x] = '.';
+                add_corridor_walls(current_x, current_y);
+            }
+            
+            // ایجاد انشعابات تصادفی
+            if (rand() % 100 < 5) {
+                create_random_branch(current_x, current_y);
+            }
+        }
+    }
+
+    void add_corridor_walls(int x, int y) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (x+dx >= 0 && x+dx < MAP_WIDTH &&
+                    y+dy >= 0 && y+dy < MAP_HEIGHT &&
+                    current_map.tiles[y+dy][x+dx] == '#') {
+                    current_map.tiles[y+dy][x+dx] = '#';
+                }
+            }
+        }
+    }
+
+    void create_random_branch(int x, int y) {
+        int length = 3 + rand() % 5;
+        int dir = rand() % 4;
+        int dx[] = {0, 0, -1, 1};
+        int dy[] = {-1, 1, 0, 0};
+        
+        for (int i = 0; i < length; i++) {
+            x += dx[dir];
+            y += dy[dir];
+            
+            if (x < 1 || x >= MAP_WIDTH-1 || y < 1 || y >= MAP_HEIGHT-1) break;
+            
+            if (current_map.tiles[y][x] == '#') {
+                current_map.tiles[y][x] = '.';
+                add_corridor_walls(x, y);
+            }
+        }
+    }
