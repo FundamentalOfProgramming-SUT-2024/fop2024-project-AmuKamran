@@ -46,6 +46,8 @@ typedef struct {
     Room rooms[MAX_ROOMS];
     int room_count;
     int stairs_x, stairs_y;
+     int prev_room_width; 
+    int prev_room_height;
 } Map;
 
 typedef struct {
@@ -80,7 +82,7 @@ void display_scoreboard();
 void init_map();
 bool can_place_room(Room room);
 void create_room(Room room);
-void generate_map();
+void generate_map(bool keep_dimensions); 
 void draw_map();
 void game_play();
 void discover_current_room(int px, int py);
@@ -372,6 +374,7 @@ void start_game() {
             case 1:
                 clear();
                 game_play();
+                return;
             case 2:
                 login_user(); // فراخوانی تابع لاگین
                 return;
@@ -776,11 +779,24 @@ void place_door(Room *room) {
     }
 }
 
-void generate_map() {
+
+void generate_map(bool keep_dimensions) { 
     init_map();
     current_map.room_count = 0;
     srand(time(NULL));
 
+    // اگر نیاز به حفظ ابعاد اتاق قبلی داریم
+    if(keep_dimensions && current_map.prev_room_width > 0) {
+        Room first_room;
+        first_room.width = current_map.prev_room_width;
+        first_room.height = current_map.prev_room_height;
+        first_room.x = 1 + rand() % (MAP_WIDTH - first_room.width - 2);
+        first_room.y = 1 + rand() % (MAP_HEIGHT - first_room.height - 2);
+        
+        if(can_place_room(first_room)) {
+            create_room(first_room);
+        }
+    }
     // تولید اتاق‌ها
     int attempts = 0;
     while (current_map.room_count < MIN_ROOMS && attempts < 1000) {
@@ -958,14 +974,13 @@ void generate_map() {
     current_map.stairs_y = last_room.y + last_room.height/2;
     current_map.tiles[current_map.stairs_y][current_map.stairs_x] = '>';
 }
-
 // تابع نمایش نقشه
 void draw_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (current_map.discovered[y][x] || player.map_revealed) {
                 attron(COLOR_PAIR(1));
-                mvaddch(y, x, current_map.tiles[y][x]);
+                mvaddch(y+2, x, current_map.tiles[y][x]);
                 attroff(COLOR_PAIR(1));
             } else {
                 mvaddch(y, x, ' ');
@@ -985,7 +1000,7 @@ void game_play() {
     init_pair(2, COLOR_RED, COLOR_BLACK);   // برای تله‌ها
     init_pair(3, COLOR_GREEN, COLOR_BLACK); // برای درها
 
-    generate_map();
+    generate_map(false);
     player.x = current_map.rooms[0].x + 1;
     player.y = current_map.rooms[0].y + 1;
     player.hp = 100;
@@ -996,9 +1011,8 @@ void game_play() {
     int ch;
     while ((ch = getch()) != 'q') {
         clear();
-        
-        // پردازش ورودی
-        int dx = 0, dy = 0;
+        // پردازش ورود
+       int dx = 0, dy = 0;
         switch(ch) {
             case KEY_LEFT:  dx = -1; break;
             case KEY_RIGHT: dx = 1; break;
@@ -1015,13 +1029,43 @@ void game_play() {
             player.y = new_y;
             current_map.discovered[new_y][new_x] = true;
         }
-
-        // برخورد با پله
         if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
-            generate_map(); // تولید طبقه جدید
-            player.x = current_map.rooms[0].x + 1;
-            player.y = current_map.rooms[0].y + 1;
+            // پیدا کردن اتاق فعلی
+            Room current_room;
+            for (int i = 0; i < current_map.room_count; i++) {
+                Room r = current_map.rooms[i];
+                if (player.x >= r.x && player.x < r.x + r.width &&
+                    player.y >= r.y && player.y < r.y + r.height) {
+                    current_room = r;
+                    break;
+                }
+            }
+
+            // ذخیره ابعاد اتاق برای نقشه بعدی
+            current_map.prev_room_width = current_room.width;
+            current_map.prev_room_height = current_room.height;
+
+            // تولید نقشه جدید با حفظ ابعاد
+            generate_map(true);
+
+            // تنظیم موقعیت بازیکن در اتاق اول جدید
+            Room new_room = current_map.rooms[0];
+            
+            // محاسبه موقعیت نسبی
+            float rel_x = (float)(player.x - current_room.x) / current_room.width;
+            float rel_y = (float)(player.y - current_room.y) / current_room.height;
+
+            // تبدیل به موقعیت جدید
+            player.x = new_room.x + (int)(rel_x * new_room.width);
+            player.y = new_room.y + (int)(rel_y * new_room.height);
+
+            // محدودیت‌های موقعیت
+            player.x = (player.x < new_room.x + 1) ? new_room.x + 1 : player.x;
+            player.x = (player.x > new_room.x + new_room.width - 2) ? new_room.x + new_room.width - 2 : player.x;
+            player.y = (player.y < new_room.y + 1) ? new_room.y + 1 : player.y;
+            player.y = (player.y > new_room.y + new_room.height - 2) ? new_room.y + new_room.height - 2 : player.y;
         }
+    
 
         // رسم رابط کاربری
         draw_map();
@@ -1030,7 +1074,7 @@ void game_play() {
 
         // نمایش بازیکن
         attron(COLOR_PAIR(3));
-        mvaddch(player.y, player.x, '@');
+        mvaddch(player.y + 2, player.x, '@');
         attroff(COLOR_PAIR(3));
 
         discover_current_room(player.x, player.y);
