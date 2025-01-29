@@ -16,6 +16,7 @@ typedef struct {
     char email[100];
     int score;
     int gold;
+    int food;
     int games_played;
     time_t last_played_time;
 } User;
@@ -55,7 +56,9 @@ typedef struct {
     int x, y;
     int hp;
     int gold;
+    int food;
     int keys;
+    int hunger;
     bool map_revealed;
 } Player;
 
@@ -101,10 +104,11 @@ int main() {
     keypad(stdscr, TRUE);
     start_color();
 
-    init_pair(1, COLOR_BLACK, COLOR_YELLOW); // طلایی
-    init_pair(2, COLOR_BLACK, COLOR_WHITE);  // نقره‌ای
-    init_pair(3, COLOR_BLACK, COLOR_RED);    // برنزی
-
+    init_pair(4, COLOR_WHITE, COLOR_BLACK); 
+    init_pair(2, COLOR_CYAN, COLOR_BLACK);  // نقره‌ای
+    init_pair(3, COLOR_MAGENTA, COLOR_BLACK);    // برنزی
+    init_pair(1, COLOR_YELLOW, COLOR_BLACK); // زرد
+    init_pair(5, COLOR_RED, COLOR_BLACK); // نارنجی
     load_users(); // بارگذاری کاربران در شروع برنامه
     display_menu();
     endwin();
@@ -343,7 +347,7 @@ void register_user() {
         return;
     }
 
-   fprintf(fp, "%s,%s,%s,0,0,0,%ld\n", 
+   fprintf(fp, "%s,%s,%s,0,0,0,0,%ld\n", 
         username, 
         password, 
         email,
@@ -438,11 +442,11 @@ void login_user() {
             napms(1500);
             return;
         }
-
+        int nothing;
         user_found = false;
-        while (fscanf(fp, "%49[^,],%49[^,],%99[^,],%d,%d,%d,%ld\n",
+        while (fscanf(fp, "%49[^,],%49[^,],%99[^,],%d,%d,%d,%d,%ld\n",
                       stored_username, stored_password, stored_email,
-                      &stored_score, &stored_gold, &stored_games_played,
+                      &stored_score, &stored_gold,&nothing ,&stored_games_played,
                       &stored_last_played_time) != EOF) {
             if (strcmp(stored_username, username) == 0) {
                 user_found = true;
@@ -581,14 +585,15 @@ void load_users() {
     if (fp == NULL) return;
 
     user_count = 0;
-    while (fscanf(fp, "%49[^,],%49[^,],%99[^,],%d,%d,%d,%ld\n",
+    while (fscanf(fp, "%49[^,],%49[^,],%99[^,],%d,%d,%d,%d,%ld\n",
                   users[user_count].username,
                   users[user_count].password,
                   users[user_count].email,
                   &users[user_count].score,
                   &users[user_count].gold,
+                  &users[user_count].food,
                   &users[user_count].games_played,
-                  &users[user_count].last_played_time) == 7) {
+                  &users[user_count].last_played_time) == 8) {
         user_count++;
         if (user_count >= MAX_USERS) break;
     }
@@ -600,12 +605,13 @@ void save_users() {
     if (fp == NULL) return;
 
     for (int i = 0; i < user_count; i++) {
-        fprintf(fp, "%s,%s,%s,%d,%d,%d,%ld\n",
+        fprintf(fp, "%s,%s,%s,%d,%d,%d,%d,%ld\n",
                 users[i].username,
                 users[i].password,
                 users[i].email,
                 users[i].score,
                 users[i].gold,
+                users[i].food,
                 users[i].games_played,
                 users[i].last_played_time);
     }
@@ -973,22 +979,54 @@ void generate_map(bool keep_dimensions) {
     current_map.battle_gate_x = battle_room.x + battle_room.width/2;
     current_map.battle_gate_y = battle_room.y + battle_room.height/2;
     current_map.tiles[current_map.battle_gate_y][current_map.battle_gate_x] = '^';
-}
 
-// تابع نمایش نقشه
-void draw_map() {
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (current_map.discovered[y][x] || player.map_revealed) {
-                attron(COLOR_PAIR(1));
-                mvaddch(y+2, x, current_map.tiles[y][x]);
-                attroff(COLOR_PAIR(1));
-            } else {
-                mvaddch(y+2, x, ' ');
+    int food_count = 0;
+    int gold_count = 0;
+
+
+   while (food_count < 4 || gold_count < 3) {
+        int x = rand() % MAP_WIDTH;
+        int y = rand() % MAP_HEIGHT;
+
+        if (current_map.tiles[y][x] == '.') {
+            if (food_count < 4) {
+                current_map.tiles[y][x] = 'f';
+                food_count++;
+            } else if (gold_count < 3) {
+                current_map.tiles[y][x] = 'g';
+                gold_count++;
             }
         }
     }
 }
+
+
+void draw_map() {
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (current_map.discovered[y][x] || player.map_revealed) {
+                char tile = current_map.tiles[y][x];
+                // بررسی نوع کاشی و اعمال رنگ مناسب
+                if (tile == 'g') { // طلا
+                    attron(COLOR_PAIR(3)); // فعال کردن رنگ زرد
+                    mvaddch(y+2, x, tile);
+                    attroff(COLOR_PAIR(3)); // غیرفعال کردن رنگ زرد
+                } else if (tile == 'f') { // غذا
+                    attron(COLOR_PAIR(5)); // فعال کردن رنگ نارنجی
+                    mvaddch(y+2, x, tile);
+                    attroff(COLOR_PAIR(5)); // غیرفعال کردن رنگ نارنجی
+                } else {
+                    attron(COLOR_PAIR(1)); // رنگ پیش‌فرض
+                    mvaddch(y+2, x, tile);
+                    attroff(COLOR_PAIR(1));
+                }
+            } else {
+                mvaddch(y+2, x, ' '); // کاشی‌های ناشناخته
+            }
+        }
+    }
+}
+
 
 // ============Game_Play============
 void game_play() {
@@ -1008,105 +1046,235 @@ void game_play() {
     player.hp = 100;
     player.gold = 0;
     player.keys = 0;
+    player.food = 0;
+    player.hunger = 100;
     player.map_revealed = false;
+    bool backpack_open = false;
+    bool speed_mode = false;
+    bool velocity_mode = false;
+    WINDOW *backpack_win;
 
+    // اندازه نقشه را تعریف می‌کنیم
+    int map_width = MAP_WIDTH;
+    int map_height = MAP_HEIGHT;
+
+    // تعیین موقعیت و اندازه پنجره کوله‌پشتی
+    int win_height = 10;
+    int win_width = 24;
+    int start_y = 2;
+    int start_x = map_width + 5; // تنظیم X به گونه‌ای که پنجره در سمت راست نقشه قرار گیرد
+
+    // ایجاد پنجره کوله‌پشتی خارج از حلقه
+    backpack_win = newwin(win_height, win_width, start_y, start_x);
     int ch;
-    while ((ch = getch()) != 'q') {
-        clear();
-        // پردازش ورود
-       int dx = 0, dy = 0;
-        switch(ch) {
-            case KEY_LEFT:  dx = -1; break;
-            case KEY_RIGHT: dx = 1; break;
-            case KEY_UP:    dy = -1; break;
-            case KEY_DOWN:  dy = 1; break;
-            case 'm': player.map_revealed = !player.map_revealed; break;
-        }
+   while ((ch = getch()) != 'q') {
+        // پاک کردن محتوای قبلی
+        wclear(backpack_win);
 
-        // بررسی حرکت مجاز
-        int new_x = player.x + dx;
-        int new_y = player.y + dy;
-        if (current_map.tiles[new_y][new_x] != '#') {
-            player.x = new_x;
-            player.y = new_y;
-            current_map.discovered[new_y][new_x] = true;
-                    // اگر در راهرو هستیم، ۳ خانه بعدی را کشف کن
-            if (current_map.tiles[new_y][new_x] == '.') {
-                for (int step = 1; step <= 3; step++) {
-                    int next_x = player.x + (dx * step);
-                    int next_y = player.y + (dy * step);
-                    
-                    // بررسی مرزهای نقشه
-                   if (next_x >= 0 && next_x < MAP_WIDTH && 
-                        next_y >= 0 && next_y < MAP_HEIGHT &&
-                        current_map.tiles[next_y][next_x] == '.') {
-                        current_map.discovered[next_y][next_x] = true;
+        // پردازش ورودی
+        if (backpack_open) {
+            switch(ch) {
+                case '\t': // خروج از کوله‌پشتی با TAB
+                    backpack_open = false;
+                    clear();
+                    break;
+                case 'f': // خوردن غذا
+                    if(player.food > 0) {
+                        player.food--;
+                        player.hunger += 30;
+                        if(player.hunger > 100) player.hunger = 100;
                     }
-                    else {
-                        break; // اگر به دیوار رسیدیم ادامه ندهیم
-                    }
-                }
+                    break;
             }
         }
-        
-        if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
-            // پیدا کردن اتاق فعلی
-            Room current_room;
-            for (int i = 0; i < current_map.room_count; i++) {
-                Room r = current_map.rooms[i];
-                if (player.x >= r.x && player.x < r.x + r.width &&
-                    player.y >= r.y && player.y < r.y + r.height) {
-                    current_room = r;
+        else {
+            if (ch == '\t'){
+                backpack_open = true;
+            }
+        }
+        int dx = 0, dy = 0;
+        bool is_main_direction = false;
+
+       switch(ch) {
+            case '8': dy = -1; break;
+            case '5': dy = 1; break;
+            case '4': dx = -1; break;
+            case '6': dx = 1; break;
+            case '7': dx = -1; dy = -1; break;
+            case '9': dx = 1; dy = -1; break;
+            case '1': dx = -1; dy = 1; break;
+            case '3': dx = 1; dy = 1; break;
+            case 'm': player.map_revealed = !player.map_revealed; break;
+            case 's': 
+                speed_mode = !speed_mode;
+                velocity_mode = false;
+                break;
+            case 'v': 
+                velocity_mode = !velocity_mode;
+                speed_mode = false;
+                break;
+        }
+
+        is_main_direction = ( (dx != 0 && dy == 0) || (dy != 0 && dx == 0) );
+
+        if ((speed_mode || velocity_mode) && is_main_direction) {
+            while (1) {
+                int next_x = player.x + dx;
+                int next_y = player.y + dy;
+
+                if (next_x < 0 || next_x >= MAP_WIDTH || next_y < 0 || next_y >= MAP_HEIGHT) break;
+
+                char tile = current_map.tiles[next_y][next_x];
+                bool blocked = false;
+
+                if (speed_mode) {
+                    blocked = (tile == '#' || tile == 'T' || (next_x == current_map.stairs_x && next_y == current_map.stairs_y));
+                } else if (velocity_mode) {
+                    blocked = (tile == '#' || tile == 'T' || tile == 'g' || tile == 'f' || (next_x == current_map.stairs_x && next_y == current_map.stairs_y));
+                }
+
+                if (blocked) break;
+
+                player.x = next_x;
+                player.y = next_y;
+                current_map.discovered[player.y][player.x] = true;
+
+                if (current_map.tiles[player.y][player.x] == '.') {
+                    for (int step = 1; step <= 3; step++) {
+                        int next_step_x = player.x + (dx * step);
+                        int next_step_y = player.y + (dy * step);
+                        if (next_step_x >= 0 && next_step_x < MAP_WIDTH && 
+                            next_step_y >= 0 && next_step_y < MAP_HEIGHT &&
+                            current_map.tiles[next_step_y][next_step_x] == '.') {
+                            current_map.discovered[next_step_y][next_step_x] = true;
+                        } else break;
+                    }
+                }
+
+                if (current_map.tiles[player.y][player.x] == 'g') {
+                    player.gold++;
+                    current_map.tiles[player.y][player.x] = '.';
+                }
+
+                if (current_map.tiles[player.y][player.x] == 'f') {
+                    if (player.food < 5) {
+                        player.food++;
+                        current_map.tiles[player.y][player.x] = '.';
+                    }
+                }
+
+                if (current_map.tiles[player.y][player.x] == 'T') {
+                    player.hp -= 10;
+                }
+
+                if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
+                    Room current_room;
+                    for (int i = 0; i < current_map.room_count; i++) {
+                        Room r = current_map.rooms[i];
+                        if (player.x >= r.x && player.x < r.x + r.width &&
+                            player.y >= r.y && player.y < r.y + r.height) {
+                            current_room = r;
+                            break;
+                        }
+                    }
+
+                    current_map.prev_room_width = current_room.width;
+                    current_map.prev_room_height = current_room.height;
+                    generate_map(true);
+                    Room new_room = current_map.rooms[0];
+                    float rel_x = (float)(player.x - current_room.x) / current_room.width;
+                    float rel_y = (float)(player.y - current_room.y) / current_room.height;
+                    player.x = new_room.x + (int)(rel_x * new_room.width);
+                    player.y = new_room.y + (int)(rel_y * new_room.height);
+                    player.x = (player.x < new_room.x + 1) ? new_room.x + 1 : (player.x > new_room.x + new_room.width - 2) ? new_room.x + new_room.width - 2 : player.x;
+                    player.y = (player.y < new_room.y + 1) ? new_room.y + 1 : (player.y > new_room.y + new_room.height - 2) ? new_room.y + new_room.height - 2 : player.y;
                     break;
                 }
+
+                if (player.x == current_map.battle_gate_x && player.y == current_map.battle_gate_y) {
+                    clear();
+                    enter_battle();
+                    generate_map(false);
+                    break;
+                }
+
+                player.hunger--;
+                if (player.hunger <= 0) {
+                    player.hp -= 2;
+                    player.hunger = 0;
+                }
             }
+        } else {
+            int new_x = player.x + dx;
+            int new_y = player.y + dy;
 
-            // ذخیره ابعاد اتاق برای نقشه بعدی
-            current_map.prev_room_width = current_room.width;
-            current_map.prev_room_height = current_room.height;
+            if (new_x >= 0 && new_x < MAP_WIDTH && new_y >= 0 && new_y < MAP_HEIGHT) {
+                if (current_map.tiles[new_y][new_x] != '#') {
+                    player.x = new_x;
+                    player.y = new_y;
+                    current_map.discovered[new_y][new_x] = true;
 
-            // تولید نقشه جدید با حفظ ابعاد
-            generate_map(true);
+                    if (current_map.tiles[new_y][new_x] == '.') {
+                        for (int step = 1; step <= 3; step++) {
+                            int next_step_x = player.x + (dx * step);
+                            int next_step_y = player.y + (dy * step);
+                            if (next_step_x >= 0 && next_step_x < MAP_WIDTH && 
+                                next_step_y >= 0 && next_step_y < MAP_HEIGHT &&
+                                current_map.tiles[next_step_y][next_step_x] == '.') {
+                                current_map.discovered[next_step_y][next_step_x] = true;
+                            } else break;
+                        }
+                    }
 
-            // تنظیم موقعیت بازیکن در اتاق اول جدید
-            Room new_room = current_map.rooms[0];
-            
-            // محاسبه موقعیت نسبی
-            float rel_x = (float)(player.x - current_room.x) / current_room.width;
-            float rel_y = (float)(player.y - current_room.y) / current_room.height;
+                    if (current_map.tiles[new_y][new_x] == 'g') {
+                        player.gold++;
+                        current_map.tiles[new_y][new_x] = '.';
+                    }
 
-            // تبدیل به موقعیت جدید
-            player.x = new_room.x + (int)(rel_x * new_room.width);
-            player.y = new_room.y + (int)(rel_y * new_room.height);
+                    if (current_map.tiles[new_y][new_x] == 'f') {
+                        if (player.food < 5) {
+                            player.food++;
+                            current_map.tiles[new_y][new_x] = '.';
+                        }
+                    }
 
-            // محدودیت‌های موقعیت
-            player.x = (player.x < new_room.x + 1) ? new_room.x + 1 : player.x;
-            player.x = (player.x > new_room.x + new_room.width - 2) ? new_room.x + new_room.width - 2 : player.x;
-            player.y = (player.y < new_room.y + 1) ? new_room.y + 1 : player.y;
-            player.y = (player.y > new_room.y + new_room.height - 2) ? new_room.y + new_room.height - 2 : player.y;
+                    if (current_map.tiles[new_y][new_x] == 'T') {
+                        player.hp -= 10;
+                    }
+
+                    if (dx != 0 || dy != 0) {
+                        player.hunger--;
+                        if (player.hunger <= 0) {
+                            player.hp -= 2;
+                            player.hunger = 0;
+                        }
+                    }
+                }
+            }
         }
-         if (player.x == current_map.battle_gate_x && player.y == current_map.battle_gate_y) {
-            clear();
-            enter_battle();
-            generate_map(false);
-        }
-    
 
-        // رسم رابط کاربری
         draw_map();
-        mvprintw(0, 0, "Level:1  Hits:%d  Gold:%d  Keys:%d", player.hp, player.gold, player.keys);
-        mvprintw(1, 0, "Press 'm' to toggle map | 'q' to quit");
+        mvprintw(0, 0, "Level:1  HP:%d  Hunger:%d%%  Gold:%d  Keys:%d", 
+                player.hp, player.hunger, player.gold, player.keys);
+        mvprintw(1, 0, "Press 'm' to toggle map | TAB for backpack | 'q' to quit");
 
-        // نمایش بازیکن
+        if(backpack_open) {
+            box(backpack_win, 0, 0);
+            mvwprintw(backpack_win, 1, 2, "[ Backpack ]");
+            mvwprintw(backpack_win, 3, 2, "Food: %d", player.food);
+            mvwprintw(backpack_win, 5, 2, "Press F to eat");
+            mvwprintw(backpack_win, 6, 2, "1 food = +30%% hunger");
+            wrefresh(backpack_win);
+        }
+
         attron(COLOR_PAIR(3));
         mvaddch(player.y + 2, player.x, '@');
         attroff(COLOR_PAIR(3));
 
         discover_current_room(player.x, player.y);
-
         refresh();
     }
-
+    delwin(backpack_win);
     endwin();
 }
 
@@ -1197,7 +1365,7 @@ void enter_battle() {
     // بازسازی رابط اصلی
     clear();
     refresh();
-    return;
+    generate_map(true);
 }
 void create_winding_corridor(int x1, int y1, int x2, int y2) {
         int current_x = x1;
