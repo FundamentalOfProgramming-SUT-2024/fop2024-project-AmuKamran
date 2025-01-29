@@ -3,9 +3,10 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdbool.h>
-#include <ncurses.h>
+#include <locale.h>
 #include <time.h>
 #include <limits.h>
+#include<ncursesw/ncurses.h>
 
 #define USERS_FILE "/home/cumrun/rogue_game/users/users.txt"
 #define MAX_USERS 100
@@ -39,6 +40,7 @@ typedef struct {
     int x, y;
     int width, height;
     bool discovered;
+    bool is_cursed;
 } Room;
 
 typedef struct {
@@ -50,6 +52,7 @@ typedef struct {
     int battle_gate_x, battle_gate_y;
     int prev_room_width; 
     int prev_room_height;
+    Room cursed_room;
 } Map;
 
 typedef struct {
@@ -98,6 +101,7 @@ void enter_battle();
 
 
 int main() {
+    setlocale(LC_ALL,"");
     initscr();
     cbreak();
     noecho();
@@ -116,29 +120,27 @@ int main() {
 }
 
 int get_input(char *buffer, int max_len) {
-    int ch, idx = 0;
+    int ch;
+    int len = 0;
     while ((ch = getch()) != '\n') {
-        if (ch == 27) {
-            buffer[0] = '\0';
-            return 0;
+        if (ch == '\t') { 
+            return -1;
         }
         if (ch == KEY_BACKSPACE || ch == 127) {
-            if (idx > 0) {
-                idx--;
-                int y, x;
-                getyx(stdscr, y, x);
-                mvaddch(y, x - 1, ' ');
-                move(y, x - 1);
-                refresh();
+            if (len > 0) {
+                len--;
+                addch('\b');
+                addch(' ');
+                addch('\b');
             }
-        } else if (isprint(ch) && idx < max_len - 1) {
-            buffer[idx++] = ch;
+        }
+        else if (isprint(ch) && len < max_len - 1) {
             addch(ch);
-            refresh();
+            buffer[len++] = ch;
         }
     }
-    buffer[idx] = '\0';
-    return 1;
+    buffer[len] = '\0';
+    return len;
 }
 
 void display_menu() {
@@ -229,6 +231,33 @@ bool is_username_taken(const char *username) {
     return false;
 }
 
+void generate_random_password(char *password, int length) {
+    const char lowercase[] = "abcdefghijklmnopqrstuvwxyz";
+    const char uppercase[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const char digits[] = "0123456789";
+    
+    // اطمینان از وجود حداقل یک کاراکتر از هر نوع
+    password[0] = lowercase[rand() % (sizeof(lowercase) - 1)];
+    password[1] = uppercase[rand() % (sizeof(uppercase) - 1)];
+    password[2] = digits[rand() % (sizeof(digits) - 1)];
+
+    // پر کردن بقیه کاراکترها
+    const char all_chars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    for (int i = 3; i < length; i++) {
+        password[i] = all_chars[rand() % (sizeof(all_chars) - 1)];
+    }
+
+    // به هم ریختن ترتیب کاراکترها
+    for (int i = 0; i < length; i++) {
+        int j = rand() % length;
+        char temp = password[i];
+        password[i] = password[j];
+        password[j] = temp;
+    }
+    
+    password[length] = '\0';
+}
+
 void register_user() {
     int rows, cols;
     char username[50];
@@ -274,9 +303,21 @@ void register_user() {
         mvprintw(rows / 2, (cols - strlen("• At least one digit")) / 2, "• At least one digit");
         mvprintw(rows / 2 + 1, (cols - strlen("• At least one uppercase letter")) / 2, "• At least one uppercase letter");
         mvprintw(rows / 2 + 2, (cols - strlen("• At least one lowercase letter")) / 2, "• At least one lowercase letter");
+        mvprintw(rows / 2 + 5, (cols - strlen("Press TAB to generate random password")) / 2,"Press TAB to generate random password");
         mvprintw(rows / 2 + 4, (cols - strlen("Enter Password: ")) / 2, "Enter Password: ");
         refresh();
         move(rows / 2 + 4, (cols - strlen("Enter Password: ")) / 2 + strlen("Enter Password: "));
+        int input_result = get_input(password, sizeof(password));
+    
+        if (input_result == -1) { // اگر کاربر Tab زده
+            generate_random_password(password, 10);
+            mvprintw(rows / 2 + 4, (cols - strlen("Enter Password: ")) / 2 + strlen("Enter Password: "), 
+               "%s", password);
+            refresh();
+        
+        while (getch() != '\n') {}
+        }
+        else if (input_result == 0) {
         if (!get_input(password, sizeof(password))) {
             clear();
             mvprintw(rows / 2, (cols - strlen("Returning to main menu.")) / 2, "Returning to main menu.");
@@ -290,6 +331,7 @@ void register_user() {
             refresh();
             napms(1500);
             return;
+        }
         }
         char errors[4][100];
         int error_count;
@@ -686,6 +728,14 @@ void display_scoreboard() {
         } else if (i == 2) {
             mvprintw(y, 85, "Pro");
         }
+        if (i < 3) {
+        attron(COLOR_PAIR(i + 1));
+        const char* medals[] = {" 🥇", " 🥈", " 🥉"};
+        mvprintw(y, 20, "%s%s", users[i].username, medals[i]);
+        attroff(COLOR_PAIR(i + 1));
+        } else {
+        mvprintw(y, 20, "%s", users[i].username);
+        }
 
         // بازنشانی رنگ‌ها
         if (i < 3) {
@@ -735,14 +785,18 @@ bool can_place_room(Room room) {
 }
 
 void create_room(Room room) {
-    // ایجاد اتاق با دیوار کامل
     for (int y = room.y; y < room.y + room.height; y++) {
         for (int x = room.x; x < room.x + room.width; x++) {
             if (x == room.x || x == room.x + room.width - 1 ||
                 y == room.y || y == room.y + room.height - 1) {
                 current_map.tiles[y][x] = '#'; // دیوار
             } else {
-                current_map.tiles[y][x] = '*'; // کف اتاق
+                if (room.is_cursed) {
+                    // 80% شانس ایجاد تله در کف
+                    current_map.tiles[y][x] = (rand() % 100 < 60) ? '^' : '*';
+                } else {
+                    current_map.tiles[y][x] = '*'; // کف معمولی
+                }
             }
         }
     }
@@ -803,6 +857,7 @@ void generate_map(bool keep_dimensions) {
         first_room.height = current_map.prev_room_height;
         first_room.x = 1 + rand() % (MAP_WIDTH - first_room.width - 2);
         first_room.y = 1 + rand() % (MAP_HEIGHT - first_room.height - 2);
+        first_room.is_cursed = false;
         
         if(can_place_room(first_room)) {
             create_room(first_room);
@@ -838,6 +893,23 @@ void generate_map(bool keep_dimensions) {
         if (can_place_room(room)) {
             create_room(room);
         }
+    }
+    int cursed_room_added = 0;
+    while (cursed_room_added == 0 && attempts < 1000) {
+        Room cursed_room;
+        cursed_room.width = 7; // اندازه ثابت برای اتاق طلسم
+        cursed_room.height = 7;
+        cursed_room.x = 1 + rand() % (MAP_WIDTH - cursed_room.width - 2);
+        cursed_room.y = 1 + rand() % (MAP_HEIGHT - cursed_room.height - 2);
+        cursed_room.is_cursed = true;
+        cursed_room.discovered = false;
+
+        if (can_place_room(cursed_room)) {
+            create_room(cursed_room);
+            current_map.cursed_room = cursed_room; // ذخیره اتاق طلسم
+            cursed_room_added = 1;
+        }
+        attempts++;
     }
 
  // ایجاد آرایه برای الگوریتم MST
@@ -1006,6 +1078,28 @@ void draw_map() {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (current_map.discovered[y][x] || player.map_revealed) {
                 char tile = current_map.tiles[y][x];
+                bool is_cursed_wall = false;
+                // بررسی آیا تایل در اتاق طلسم است
+                if (x >= current_map.cursed_room.x && 
+                    x < current_map.cursed_room.x + current_map.cursed_room.width &&
+                    y >= current_map.cursed_room.y && 
+                    y < current_map.cursed_room.y + current_map.cursed_room.height) {
+                        
+                    is_cursed_wall = (x == current_map.cursed_room.x ||
+                                     x == current_map.cursed_room.x + current_map.cursed_room.width - 1 ||
+                                     y == current_map.cursed_room.y ||
+                                     y == current_map.cursed_room.y + current_map.cursed_room.height - 1);
+                }
+
+                if (tile == '#') {
+                    if (is_cursed_wall) {
+                        attron(COLOR_PAIR(3)); // رنگ بنفش برای دیوارهای طلسم
+                    } else {
+                        attron(COLOR_PAIR(1));
+                    }
+                    mvaddch(y+2, x, '#');
+                    attroff(COLOR_PAIR(4));
+                }
                 // بررسی نوع کاشی و اعمال رنگ مناسب
                 if (tile == 'g') { // طلا
                     attron(COLOR_PAIR(3)); // فعال کردن رنگ زرد
@@ -1031,6 +1125,7 @@ void draw_map() {
 // ============Game_Play============
 void game_play() {
     init_pair(4, COLOR_CYAN, COLOR_BLACK); 
+    init_pair(3, COLOR_MAGENTA, COLOR_BLACK);
     initscr();
     cbreak();
     noecho();
@@ -1052,6 +1147,7 @@ void game_play() {
     bool backpack_open = false;
     bool speed_mode = false;
     bool velocity_mode = false;
+    bool pick = false;
     WINDOW *backpack_win;
 
     // اندازه نقشه را تعریف می‌کنیم
@@ -1113,6 +1209,18 @@ void game_play() {
                 velocity_mode = !velocity_mode;
                 speed_mode = false;
                 break;
+            case 'p': pick = !pick; break;
+        }
+
+        bool in_cursed_room = (player.x >= current_map.cursed_room.x &&
+                              player.x < current_map.cursed_room.x + current_map.cursed_room.width &&
+                              player.y >= current_map.cursed_room.y &&
+                              player.y < current_map.cursed_room.y + current_map.cursed_room.height);
+
+        if (in_cursed_room) {
+            player.hp -= 2; // کاهش 2 HP در هر حرکت
+            if (player.hp < 0) player.hp = 0;
+            if(current_map.tiles[player.y][player.x] == '^') player.hp -= 10;
         }
 
         is_main_direction = ( (dx != 0 && dy == 0) || (dy != 0 && dx == 0) );
@@ -1128,9 +1236,9 @@ void game_play() {
                 bool blocked = false;
 
                 if (speed_mode) {
-                    blocked = (tile == '#' || tile == 'T' || (next_x == current_map.stairs_x && next_y == current_map.stairs_y));
+                    blocked = (tile == '#' || (next_x == current_map.stairs_x && next_y == current_map.stairs_y));
                 } else if (velocity_mode) {
-                    blocked = (tile == '#' || tile == 'T' || tile == 'g' || tile == 'f' || (next_x == current_map.stairs_x && next_y == current_map.stairs_y));
+                    blocked = (tile == '#' ||  tile == 'g' || tile == 'f' || (next_x == current_map.stairs_x && next_y == current_map.stairs_y));
                 }
 
                 if (blocked) break;
@@ -1151,20 +1259,16 @@ void game_play() {
                     }
                 }
 
-                if (current_map.tiles[player.y][player.x] == 'g') {
+                if (current_map.tiles[player.y][player.x] == 'g' && pick) {
                     player.gold++;
                     current_map.tiles[player.y][player.x] = '.';
                 }
 
-                if (current_map.tiles[player.y][player.x] == 'f') {
+                if (current_map.tiles[player.y][player.x] == 'f' && pick) {
                     if (player.food < 5) {
                         player.food++;
                         current_map.tiles[player.y][player.x] = '.';
                     }
-                }
-
-                if (current_map.tiles[player.y][player.x] == 'T') {
-                    player.hp -= 10;
                 }
 
                 if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
@@ -1192,10 +1296,10 @@ void game_play() {
                 }
 
                 if (player.x == current_map.battle_gate_x && player.y == current_map.battle_gate_y) {
-                    clear();
-                    enter_battle();
-                    generate_map(false);
-                    break;
+                    player.hp -= 10;
+                     current_map.battle_gate_x = '*';
+                     current_map.battle_gate_y = '*';
+                     refresh();
                 }
 
                 player.hunger--;
@@ -1214,6 +1318,36 @@ void game_play() {
                     player.y = new_y;
                     current_map.discovered[new_y][new_x] = true;
 
+                               if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
+                        Room current_room;
+                        for (int i = 0; i < current_map.room_count; i++) {
+                            Room r = current_map.rooms[i];
+                            if (player.x >= r.x && player.x < r.x + r.width &&
+                                player.y >= r.y && player.y < r.y + r.height) {
+                                current_room = r;
+                                break;
+                            }
+                        }
+
+                        current_map.prev_room_width = current_room.width;
+                        current_map.prev_room_height = current_room.height;
+                        generate_map(true);
+                        Room new_room = current_map.rooms[0];
+                        float rel_x = (float)(player.x - current_room.x) / current_room.width;
+                        float rel_y = (float)(player.y - current_room.y) / current_room.height;
+                        player.x = new_room.x + (int)(rel_x * new_room.width);
+                        player.y = new_room.y + (int)(rel_y * new_room.height);
+                        player.x = (player.x < new_room.x + 1) ? new_room.x + 1 : (player.x > new_room.x + new_room.width - 2) ? new_room.x + new_room.width - 2 : player.x;
+                        player.y = (player.y < new_room.y + 1) ? new_room.y + 1 : (player.y > new_room.y + new_room.height - 2) ? new_room.y + new_room.height - 2 : player.y;
+                    }
+
+                    // چک دروازه نبرد در حرکت عادی
+                    if (player.x == current_map.battle_gate_x && player.y == current_map.battle_gate_y) {
+                        player.hp -= 10;
+                        current_map.battle_gate_x = '*';
+                        current_map.battle_gate_y = '*';
+                    }
+
                     if (current_map.tiles[new_y][new_x] == '.') {
                         for (int step = 1; step <= 3; step++) {
                             int next_step_x = player.x + (dx * step);
@@ -1226,20 +1360,16 @@ void game_play() {
                         }
                     }
 
-                    if (current_map.tiles[new_y][new_x] == 'g') {
+                    if (current_map.tiles[new_y][new_x] == 'g' && pick) {
                         player.gold++;
                         current_map.tiles[new_y][new_x] = '.';
                     }
 
-                    if (current_map.tiles[new_y][new_x] == 'f') {
+                    if (current_map.tiles[new_y][new_x] == 'f' && pick) {
                         if (player.food < 5) {
                             player.food++;
                             current_map.tiles[new_y][new_x] = '.';
                         }
-                    }
-
-                    if (current_map.tiles[new_y][new_x] == 'T') {
-                        player.hp -= 10;
                     }
 
                     if (dx != 0 || dy != 0) {
