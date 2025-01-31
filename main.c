@@ -14,6 +14,7 @@
 #define MAX_MESSAGES 5
 #define MESSAGE_LENGTH 100
 #define MAX_MONSTERS 6
+#define MAX_WEAPONS 6
 
 typedef struct {
     char username[50];
@@ -59,6 +60,15 @@ typedef struct {
 } monster;
 
 typedef struct {
+    char type;      
+    int damage;     
+    bool throwable;   
+    int ammo; 
+    int range;
+    int x, y; 
+} Weapon;
+
+typedef struct {
     char tiles[MAP_HEIGHT][MAP_WIDTH];
     bool discovered[MAP_HEIGHT][MAP_WIDTH];
     Room rooms[MAX_ROOMS];
@@ -70,6 +80,8 @@ typedef struct {
     Room cursed_room;
     int monster_count;
     monster monsters[MAX_MONSTERS];
+    int weapon_count;
+    Weapon weapons[MAX_WEAPONS];
 } Map;
 
 typedef struct {
@@ -81,7 +93,20 @@ typedef struct {
     int hunger;
     bool map_revealed;
     time_t last_heal_time;
+    Weapon *current_weapon;
+    Weapon *weapons[10];
+    int weapon_count;
 } Player;
+
+
+Weapon weapons_list[] = {
+    {'d', 3, true, 1, 10},  
+    {'w', 4, true, 3, 10},  
+    {'a', 2, true, 5, 10}, 
+    {'s', 6, false, 1, 10}
+};
+
+Weapon default_weapon = {'m', 10, false, 1};
 
 
 Map current_map;
@@ -89,6 +114,7 @@ Player player;
 
 monster monsters[MAX_MONSTERS];
 int monster_count;
+bool hited = false;
 
 // تابع‌های کمکی
 int get_input(char *buffer, int max_len);
@@ -818,8 +844,8 @@ void create_room(Room room) {
                 current_map.tiles[y][x] = '#'; // دیوار
             } else {
                 if (room.is_cursed) {
-                    // 80% شانس ایجاد تله در کف
-                    current_map.tiles[y][x] = (rand() % 100 < 60) ? '^' : '*';
+                 
+                    current_map.tiles[y][x] = (rand() % 100 < 50) ? '^' : '*';
                 } else {
                     current_map.tiles[y][x] = '*'; // کف معمولی
                 }
@@ -870,6 +896,39 @@ void place_door(Room *room) {
     }
 }
 
+bool is_valid_weapon_position(int x, int y) {
+    // بررسی مرزهای نقشه
+    if (x < 0 || x + 1 >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
+        return false;
+    }
+    
+    // بررسی اینکه هر دو خانه کف اتاق باشند
+    if (current_map.tiles[y][x] != '*' || current_map.tiles[y][x + 1] != '*') {
+        return false;
+    }
+    
+    // بررسی تداخل با سایر اسلحه‌ها
+    for (int i = 0; i < current_map.weapon_count; i++) {
+        Weapon wp = current_map.weapons[i];
+        if ((wp.x == x || wp.x == x + 1) && wp.y == y) {
+            return false;
+        }
+    }
+    
+    // بررسی تداخل با پله، تله و سایر موجودیت‌ها
+    if ((x == current_map.stairs_x && y == current_map.stairs_y) ||
+        (x + 1 == current_map.stairs_x && y == current_map.stairs_y)) {
+        return false;
+    }
+    if ((x == current_map.battle_gate_x && y == current_map.battle_gate_y) ||
+        (x + 1 == current_map.battle_gate_x && y == current_map.battle_gate_y)) {
+        return false;
+    }
+
+    
+    return true;
+}
+
 
 void generate_map(bool keep_dimensions) { 
     init_map();
@@ -898,7 +957,7 @@ void generate_map(bool keep_dimensions) {
         room.x = 1 + rand() % (MAP_WIDTH - room.width - 2);
         room.y = 1 + rand() % (MAP_HEIGHT - room.height - 2);
         room.discovered = false;
-
+        room.is_cursed = false;
         if (can_place_room(room)) {
             create_room(room);
             attempts = 0;
@@ -1188,6 +1247,60 @@ void generate_map(bool keep_dimensions) {
             attempts++;
         }
     }
+
+    int min_weapons = 4, max_weapons = 6;
+    int num_weapons = rand() % (max_weapons - min_weapons + 1) + min_weapons;
+    
+    current_map.weapon_count = 0;
+    
+    for(int i=0; i<num_weapons; i++) {
+        Weapon wp;
+        int r = rand() % 4;
+        switch(r) {
+            case 0: // خنجر
+                wp.type = 'd';
+                wp.damage = 3;
+                wp.throwable = true;
+                wp.ammo = 1;
+                wp.range = 10; 
+                break;
+            case 1: // چوب جادو
+                wp.type = 'w';
+                wp.damage = 4;
+                wp.throwable = true;
+                wp.ammo = 3;
+                wp.range = 10; 
+                break;
+            case 2: // تیر معمولی
+                wp.type = 'a';
+                wp.damage = 2;
+                wp.throwable = true;
+                wp.ammo = 5;
+                wp.range = 10; 
+                break;
+            case 3: // شمشیر
+                wp.type = 's';
+                wp.damage = 6;
+                wp.throwable = false;
+                wp.ammo = 1;
+                wp.range = 10; 
+                break;
+        }
+        
+        // پیدا کردن موقعیت مناسب
+        int attempts = 0;
+        do {
+            Room room = current_map.rooms[rand() % current_map.room_count];
+            wp.x = room.x + 1 + rand() % (room.width - 2);
+            wp.y = room.y + 1 + rand() % (room.height - 2);
+            attempts++;
+        } while(!is_valid_weapon_position(wp.x, wp.y) && attempts < 100);
+
+        if(attempts < 100) {
+            current_map.weapons[current_map.weapon_count++] = wp;
+            current_map.tiles[wp.y][wp.x] = wp.type; 
+        }
+    }
 }
 
 
@@ -1234,6 +1347,18 @@ void draw_map() {
                                 break;
                             }
                         }
+                    } else if (tile == 'd'){
+                        mvprintw(y+2,x,"\U0001F5E1");
+                        x++;
+                    } else if (tile == 'w'){
+                        mvprintw(y+2,x,"\u2728");
+                        x++;
+                    } else if (tile == 'a'){
+                        mvprintw(y+2,x,"\U0001F3F9");
+                        x++;
+                    } else if (tile == 's'){
+                        mvprintw(y+2,x,"\u2694");
+                        x++;
                     }
                     // Handle gold, food, etc.
                     else if (tile == 'g') {
@@ -1250,8 +1375,6 @@ void draw_map() {
                         attroff(COLOR_PAIR(1));
                     }
                 }
-            } else {
-                mvaddch(y+2, x, ' '); // Undiscovered tiles
             }
         }
     }
@@ -1266,6 +1389,33 @@ void display_message(const char *format, ...) {
 }
 
 // ============Game_Play============
+bool is_weapon_tile(char c) {
+    return c == 'd' || c == 'w' || c == 'a' || c == 's';
+}
+
+Weapon get_weapon_by_char(char c) {
+    for(int i = 0; i < (sizeof(weapons_list)/sizeof(Weapon)); i++)  {
+        if(weapons_list[i].type == c) return weapons_list[i];
+    }
+    return default_weapon; 
+}
+
+void add_weapon_to_player(Player *p, Weapon w) {
+    for(int i=0; i<p->weapon_count; i++) {
+        if(p->weapons[i]->type == w.type) {
+            p->weapons[i]->ammo += w.ammo;
+            return;
+        }
+    }
+    if(p->weapon_count < MAX_WEAPONS) {
+        p->weapons[p->weapon_count] = malloc(sizeof(Weapon));
+        *p->weapons[p->weapon_count] = w;
+        p->weapon_count++;
+    }
+}
+
+
+
 void game_play() {
     init_pair(4, COLOR_CYAN, COLOR_BLACK); 
     init_pair(3, COLOR_MAGENTA, COLOR_BLACK);
@@ -1287,6 +1437,8 @@ void game_play() {
     player.keys = 0;
     player.food = 0;
     player.hunger = 100;
+    player.current_weapon = &default_weapon;
+    player.weapon_count = 0;
     player.last_heal_time = time(NULL);
     player.map_revealed = false;
     bool backpack_open = false;
@@ -1300,8 +1452,8 @@ void game_play() {
     int map_height = MAP_HEIGHT;
 
     // تعیین موقعیت و اندازه پنجره کوله‌پشتی
-    int win_height = 10;
-    int win_width = 24;
+    int win_height = 40;
+    int win_width = 70;
     int start_y = 2;
     int start_x = map_width + 5; // تنظیم X به گونه‌ای که پنجره در سمت راست نقشه قرار گیرد
     int map_display_height = MAP_HEIGHT + 2;
@@ -1326,6 +1478,36 @@ void game_play() {
                         if(player.hunger > 100) player.hunger = 100;
                     }
                     break;
+                default:
+                    if(isalpha(ch)) {
+                        char c = tolower(ch);
+                        if(c == 'm') { // بازگرداندن اسلحه
+                            if(player.current_weapon) {
+                                add_weapon_to_player(&player, *player.current_weapon);
+                                player.current_weapon = NULL;
+                            }
+                        }
+                        else {
+                            for(int i=0; i<player.weapon_count; i++) {
+                                if(player.weapons[i]->type == c) {
+                                    if(player.current_weapon) {
+                                        display_message("Can't use two weapons!");
+                                    } else {
+                                        player.current_weapon = player.weapons[i];
+                                        player.weapons[i]->ammo--;
+                                        if(player.weapons[i]->ammo <= 0) {
+                                            free(player.weapons[i]);
+                                            // حذف از لیست
+                                            for(int j=i; j<player.weapon_count-1; j++)
+                                                player.weapons[j] = player.weapons[j+1];
+                                            player.weapon_count--;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
             }
         }
         else {
@@ -1345,7 +1527,7 @@ void game_play() {
             case '9': dx = 1; dy = -1; break;
             case '1': dx = -1; dy = 1; break;
             case '3': dx = 1; dy = 1; break;
-            case 'm': player.map_revealed = !player.map_revealed; break;
+            case 'm': player.map_revealed = !player.map_revealed; clear(); break;
             case 's': 
                 speed_mode = !speed_mode;
                 velocity_mode = false;
@@ -1519,22 +1701,27 @@ void game_play() {
                         }
                     }
 
+                    if (is_weapon_tile(current_map.tiles[new_y][new_x]) && pick) {
+                        char weapon_char = current_map.tiles[new_y][new_x];
+                        Weapon w = get_weapon_by_char(weapon_char);
+                        add_weapon_to_player(&player, w);
+                        current_map.tiles[new_y][new_x] = '.';
+                        display_message("Weapon picked up!");
+                    }
+
                     if (current_map.tiles[new_y][new_x] == 'g' && pick) {
-                        display_message("                                ");
                         display_message("Gold!!!");
                         player.gold++;
                         current_map.tiles[new_y][new_x] = '.';
                     }
 
                     if (current_map.tiles[player.y][player.x] == 'G' && pick) {
-                        display_message("                                ");
                     display_message("White gold!!!");
                     player.gold += 5;
                     current_map.tiles[player.y][player.x] = '.';
                     }
 
                     if (current_map.tiles[new_y][new_x] == 'f' && pick) {
-                        display_message("                                ");
                         display_message("Food!!!");
                         if (player.food < 5) {
                             player.food++;
@@ -1553,6 +1740,10 @@ void game_play() {
             }
         }
         move_monsters();
+        if (hited){
+            display_message("You got hit by monster");
+            hited = false;
+        }
         draw_map();
         mvprintw(0, 0, "Level:1  HP:%d  Hunger:%d%%  Gold:%d  Keys:%d", 
                 player.hp, player.hunger, player.gold, player.keys);
@@ -1583,6 +1774,18 @@ void game_play() {
             mvwprintw(backpack_win, 3, 2, "Food: %d", player.food);
             mvwprintw(backpack_win, 5, 2, "Press F to eat");
             mvwprintw(backpack_win, 6, 2, "1 food = +30%% hunger");
+            wrefresh(backpack_win);
+
+            mvwprintw(backpack_win, 7, 2, "Equipped: %c", 
+            player.current_weapon->type);
+            
+             for(int i = 0; i < player.weapon_count; i++) {
+        Weapon *w = player.weapons[i];
+        mvwprintw(backpack_win, 8 + i, 2, 
+            "%c: %d damage, %d ammo, %d range", // تغییر این خط
+            w->type, w->damage, w->ammo, w->range // افزودن w->range
+          );
+        }
             wrefresh(backpack_win);
         }
 
@@ -1677,6 +1880,7 @@ void move_monsters() {
             // برخورد با بازیکن
             if (new_x == player.x && new_y == player.y) {
                 player.hp -= m->power;
+                hited = true;
             
             } else {
                 // حرکت هیولا
