@@ -100,13 +100,13 @@ typedef struct {
 
 
 Weapon weapons_list[] = {
-    {'d', 3, true, 1, 10},  
-    {'w', 4, true, 3, 10},  
+    {'d', 12, true, 10, 5},  
+    {'w', 15, true, 8, 10},  
     {'a', 2, true, 5, 10}, 
-    {'s', 6, false, 1, 10}
+    {'s', 10, false, 1, 0}
 };
 
-Weapon default_weapon = {'m', 10, false, 1};
+Weapon default_weapon = {'m', 5, false, 1, 0};
 
 
 Map current_map;
@@ -1401,6 +1401,7 @@ Weapon get_weapon_by_char(char c) {
 }
 
 void add_weapon_to_player(Player *p, Weapon w) {
+
     for(int i=0; i<p->weapon_count; i++) {
         if(p->weapons[i]->type == w.type) {
             p->weapons[i]->ammo += w.ammo;
@@ -1447,69 +1448,73 @@ void game_play() {
     bool pick = false;
     WINDOW *backpack_win;
 
-    // اندازه نقشه را تعریف می‌کنیم
     int map_width = MAP_WIDTH;
     int map_height = MAP_HEIGHT;
 
-    // تعیین موقعیت و اندازه پنجره کوله‌پشتی
     int win_height = 40;
     int win_width = 70;
     int start_y = 2;
-    int start_x = map_width + 5; // تنظیم X به گونه‌ای که پنجره در سمت راست نقشه قرار گیرد
+    int start_x = map_width + 5; 
     int map_display_height = MAP_HEIGHT + 2;
-    // ایجاد پنجره کوله‌پشتی خارج از حلقه
     backpack_win = newwin(win_height, win_width, start_y, start_x);
     int ch;
    while ((ch = getch()) != 'q') {
-        // پاک کردن محتوای قبلی
-        wclear(backpack_win);
-
-        // پردازش ورودی
-        if (backpack_open) {
-            switch(ch) {
-                case '\t': // خروج از کوله‌پشتی با TAB
-                    backpack_open = false;
-                    clear();
-                    break;
-                case 'f': // خوردن غذا
-                    if(player.food > 0) {
-                        player.food--;
-                        player.hunger += 30;
-                        if(player.hunger > 100) player.hunger = 100;
-                    }
-                    break;
-                default:
-                    if(isalpha(ch)) {
-                        char c = tolower(ch);
-                        if(c == 'm') { // بازگرداندن اسلحه
-                            if(player.current_weapon) {
-                                add_weapon_to_player(&player, *player.current_weapon);
-                                player.current_weapon = NULL;
-                            }
+            wclear(backpack_win);
+            if (backpack_open) {
+                switch(ch) {
+                    case '\t': 
+                        backpack_open = false;
+                        clear();
+                        break;
+                    case 'f': 
+                        if (player.food > 0) {
+                            player.food--;
+                            player.hunger += 30;
+                            if (player.hunger > 100)
+                            player.hunger = 100;
                         }
-                        else {
-                            for(int i=0; i<player.weapon_count; i++) {
-                                if(player.weapons[i]->type == c) {
-                                    if(player.current_weapon) {
-                                        display_message("Can't use two weapons!");
-                                    } else {
-                                        player.current_weapon = player.weapons[i];
-                                        player.weapons[i]->ammo--;
-                                        if(player.weapons[i]->ammo <= 0) {
-                                            free(player.weapons[i]);
-                                            // حذف از لیست
-                                            for(int j=i; j<player.weapon_count-1; j++)
-                                                player.weapons[j] = player.weapons[j+1];
-                                            player.weapon_count--;
+                        break;
+                    default:
+                        if (isalpha(ch)) {
+                            char key = tolower(ch);
+
+                            if (player.current_weapon) {
+
+                                if (player.current_weapon->type == key) {
+                                    add_weapon_to_player(&player, *player.current_weapon);
+                                    player.current_weapon = NULL;
+                                } else {
+                                    display_message("Can't use two weapons at the same time!");
+                                }
+                            }
+                            // حالت ۲: دستان شما خالی است (هیچ اسلحه‌ای در دست ندارید)
+                            else {
+                                bool found = false;
+                                for (int i = 0; i < player.weapon_count; i++) {
+                                    if (player.weapons[i]->type == key) {
+                                        if (player.weapons[i]->ammo < 1) {
+                                            display_message("The ammo has been finished!!!");
+                                            found = true;
+                                            break;
                                         }
+                                        player.current_weapon = player.weapons[i];
+                                        found = true;
+                                        for (int j = i; j < player.weapon_count - 1; j++) {
+                                            player.weapons[j] = player.weapons[j + 1];
+                                        }
+                                        player.weapon_count--;
+                                        break;
                                     }
-                                    break;
+                                }
+                                if (!found) {
+                                    display_message("The weapon doesn't exist!!!");
                                 }
                             }
                         }
-                    }
+                        break;
+                }
             }
-        }
+
         else {
             if (ch == '\t'){
                 backpack_open = true;
@@ -1527,16 +1532,16 @@ void game_play() {
             case '9': dx = 1; dy = -1; break;
             case '1': dx = -1; dy = 1; break;
             case '3': dx = 1; dy = 1; break;
-            case 'm': player.map_revealed = !player.map_revealed; clear(); break;
-            case 's': 
+            case 'M': player.map_revealed = !player.map_revealed; clear(); break;
+            case 'S': 
                 speed_mode = !speed_mode;
                 velocity_mode = false;
                 break;
-            case 'v': 
+            case 'V': 
                 velocity_mode = !velocity_mode;
                 speed_mode = false;
                 break;
-            case 'p': pick = !pick; break;
+            case 'P': pick = !pick; break;
         }
 
         bool in_cursed_room = (player.x >= current_map.cursed_room.x &&
@@ -1587,21 +1592,30 @@ void game_play() {
                 }
 
                 if (current_map.tiles[player.y][player.x] == 'g' && pick) {
-                    display_message("                                ");
+                    display_message("                        ");
+                    int message_line = map_display_height + 2;
+                    mvprintw(message_line, 0, "> %s", last_message);
+                    refresh();
                     display_message("Gold!!!");
                     player.gold++;
                     current_map.tiles[player.y][player.x] = '.';
                 }
 
                 if (current_map.tiles[player.y][player.x] == 'G' && pick) {
-                    display_message("                                ");
+                    display_message("                        ");
+                    int message_line = map_display_height + 2;
+                    mvprintw(message_line, 0, "> %s", last_message);
+                    refresh();
                     display_message("White gold!!!");
                     player.gold += 5;
                     current_map.tiles[player.y][player.x] = '.';
                 }
 
                 if (current_map.tiles[player.y][player.x] == 'f' && pick) {
-                    display_message("                                ");
+                    display_message("                        ");
+                    int message_line = map_display_height + 2;
+                    mvprintw(message_line, 0, "> %s", last_message);
+                    refresh();
                     display_message("Food!!!");
                     if (player.food < 5) {
                         player.food++;
@@ -1610,7 +1624,10 @@ void game_play() {
                 }
 
                 if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
-                    display_message("                                ");
+                    display_message("                        ");
+                    int message_line = map_display_height + 2;
+                    mvprintw(message_line, 0, "> %s", last_message);
+                    refresh();
                     display_message("New floor!");
                     Room current_room;
                     for (int i = 0; i < current_map.room_count; i++) {
@@ -1659,7 +1676,10 @@ void game_play() {
                     current_map.discovered[new_y][new_x] = true;
 
                     if (player.x == current_map.stairs_x && player.y == current_map.stairs_y) {
-                        display_message("                                ");
+                        display_message("                        ");
+                        int message_line = map_display_height + 2;
+                        mvprintw(message_line, 0, "> %s", last_message);
+                        refresh();
                         display_message("New floor!");
                         Room current_room;
                         for (int i = 0; i < current_map.room_count; i++) {
@@ -1673,6 +1693,7 @@ void game_play() {
                         current_map.prev_room_width = current_room.width;
                         current_map.prev_room_height = current_room.height;
                         generate_map(true);
+                        clear();
                         Room new_room = current_map.rooms[0];
                         float rel_x = (float)(player.x - current_room.x) / current_room.width;
                         float rel_y = (float)(player.y - current_room.y) / current_room.height;
@@ -1701,27 +1722,49 @@ void game_play() {
                         }
                     }
 
+                    if (is_weapon_tile(current_map.tiles[new_y][new_x]) && !pick){
+                        clear();
+                    }
+
                     if (is_weapon_tile(current_map.tiles[new_y][new_x]) && pick) {
                         char weapon_char = current_map.tiles[new_y][new_x];
                         Weapon w = get_weapon_by_char(weapon_char);
                         add_weapon_to_player(&player, w);
                         current_map.tiles[new_y][new_x] = '.';
+                        display_message("                        ");
+                        int message_line = map_display_height + 2;
+                        mvprintw(message_line, 0, "> %s", last_message);
+                        refresh();
                         display_message("Weapon picked up!");
+                        clear();
                     }
 
                     if (current_map.tiles[new_y][new_x] == 'g' && pick) {
+                        display_message("                        ");
+                        int message_line = map_display_height + 2;
+                        mvprintw(message_line, 0, "> %s", last_message);
+                        refresh();
                         display_message("Gold!!!");
                         player.gold++;
                         current_map.tiles[new_y][new_x] = '.';
                     }
 
                     if (current_map.tiles[player.y][player.x] == 'G' && pick) {
+                    display_message("                        ");
+                    int message_line = map_display_height + 2;
+                    mvprintw(message_line, 0, "> %s", last_message);
+                    refresh();
+                    display_message("White gold!!!");
                     display_message("White gold!!!");
                     player.gold += 5;
                     current_map.tiles[player.y][player.x] = '.';
                     }
 
                     if (current_map.tiles[new_y][new_x] == 'f' && pick) {
+                        display_message("                        ");
+                        int message_line = map_display_height + 2;
+                        mvprintw(message_line, 0, "> %s", last_message);
+                        refresh();
                         display_message("Food!!!");
                         if (player.food < 5) {
                             player.food++;
@@ -1753,8 +1796,8 @@ void game_play() {
         mvprintw(message_line, 0, "> %s", last_message);
         
         if(time(NULL) - last_msg_time > 2) {
-            display_message("                                   ");
-            strcpy(last_message, "                              ");
+            display_message("                                                                            ");
+            strcpy(last_message, "                                                                       ");
             last_msg_time = time(NULL);
             refresh();
         }
@@ -1774,18 +1817,31 @@ void game_play() {
             mvwprintw(backpack_win, 3, 2, "Food: %d", player.food);
             mvwprintw(backpack_win, 5, 2, "Press F to eat");
             mvwprintw(backpack_win, 6, 2, "1 food = +30%% hunger");
-            wrefresh(backpack_win);
-
-            mvwprintw(backpack_win, 7, 2, "Equipped: %c", 
-            player.current_weapon->type);
-            
+            mvwprintw(backpack_win, 8, 2, "Weapons:");
+            if (player.current_weapon)
+            mvwprintw(backpack_win, 9, 2, "Equipped: %c: %d damage, %d ammo, %d range", 
+            player.current_weapon->type, player.current_weapon->damage,player.current_weapon->ammo,player.current_weapon->range);
+            mvwprintw(backpack_win, 10, 2, "Throwables:");
+            int j = 0;
+            for(int i = 0; i < player.weapon_count; i++) {
+                Weapon *w = player.weapons[i];
+                if (w->throwable){
+                    mvwprintw(backpack_win, 11 + j, 2, 
+                        "%c: %d damage, %d ammo, %d range", 
+                        w->type, w->damage, w->ammo, w->range
+                    ); j++;
+                }
+            }
+            mvwprintw(backpack_win, 11 + j, 2, "Non-Thrown:");
              for(int i = 0; i < player.weapon_count; i++) {
-        Weapon *w = player.weapons[i];
-        mvwprintw(backpack_win, 8 + i, 2, 
-            "%c: %d damage, %d ammo, %d range", // تغییر این خط
-            w->type, w->damage, w->ammo, w->range // افزودن w->range
-          );
-        }
+                Weapon *w = player.weapons[i];
+                if (!w->throwable){
+                mvwprintw(backpack_win, 12 + j, 2, 
+                    "%c: %d damage, %d ammo, %d range", 
+                    w->type, w->damage, w->ammo, w->range
+                ); j++;
+                }
+            }
             wrefresh(backpack_win);
         }
 
