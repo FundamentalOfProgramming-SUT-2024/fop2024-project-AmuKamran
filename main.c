@@ -110,6 +110,10 @@ typedef struct {
     int health_charms;
     int speed_charms;
     int damage_charms;
+    int health_charm_duration;
+    int speed_charm_duration;
+    int damage_charm_duration;
+    int original_damage;
 } Player;
 
 
@@ -165,6 +169,8 @@ void display_message(const char *format, ...);
 Room* find_room_for_monster(int x, int y);
 void move_monsters();
 void throw_weapon(Weapon *wp, int direction);
+void activate_charm(Player *p, char ch);
+void update_charms(Player *p);
 
 int main() {
     setlocale(LC_ALL,"");
@@ -1500,6 +1506,12 @@ void game_play() {
     player.weapon_count = 0;
     player.last_heal_time = time(NULL);
     player.map_revealed = false;
+    player.health_charms = 0;
+    player.speed_charms = 0;
+    player.damage_charms = 0;
+    player.health_charm_duration = 0;
+    player.speed_charm_duration = 0;
+    player.damage_charm_duration = 0;
     bool backpack_open = false;
     bool speed_mode = false;
     bool velocity_mode = false;
@@ -1582,10 +1594,10 @@ void game_play() {
         bool is_main_direction = false;
 
        switch(ch) {
-            case '8': dy = -1; break;
-            case '5': dy = 1; break;
-            case '4': dx = -1; break;
-            case '6': dx = 1; break;
+            case '8': dy = player.speed_charm_duration > 0 ? -2 : -1; break;
+            case '5': dy = player.speed_charm_duration > 0 ? 2 : 1; break;
+            case '4': dx = player.speed_charm_duration > 0 ? -2 : -1; break;
+            case '6': dx = player.speed_charm_duration > 0 ? 2 : 1; break;
             case '7': dx = -1; dy = -1; break;
             case '9': dx = 1; dy = -1; break;
             case '1': dx = -1; dy = 1; break;
@@ -1610,10 +1622,10 @@ void game_play() {
                 
                 int direction;
                 switch(dir) {
-                    case 'w': direction = 0; break; // بالا
-                    case 's': direction = 1; break; // پایین
-                    case 'a': direction = 2; break; // چپ
-                    case 'd': direction = 3; break; // راست
+                    case 'w': direction = 0; break; 
+                    case 's': direction = 1; break; 
+                    case 'a': direction = 2; break; 
+                    case 'd': direction = 3; break;
                     default: 
                         mvprintw(30, 0, "Invalid direction!          ");
                         continue;
@@ -1627,6 +1639,11 @@ void game_play() {
                 mvprintw(30, 0, "No throwable weapon equipped!");
             }
             break;
+            case '&':
+            case '$':
+            case '%':
+                activate_charm(&player, ch);
+                 break;
         }
 
         bool in_cursed_room = (player.x >= current_map.cursed_room.x &&
@@ -1893,6 +1910,7 @@ void game_play() {
                 }
             }
         }
+        update_charms(&player);
         move_monsters();
         if (hited){
             display_message("You got hit by monster");
@@ -1962,9 +1980,18 @@ void game_play() {
             }
             int charms_line = 12 + j; 
             mvwprintw(backpack_win, charms_line, 2, "Charms:");
-            mvwprintw(backpack_win, charms_line + 1, 2, "Health: %d", player.health_charms);
-            mvwprintw(backpack_win, charms_line + 2, 2, "Speed: %d", player.speed_charms);
-            mvwprintw(backpack_win, charms_line + 3, 2, "Damage: %d", player.damage_charms);
+            mvwprintw(backpack_win, charms_line + 1, 2, "Health: %d press & to use", player.health_charms);
+            mvwprintw(backpack_win, charms_line + 2, 2, "Speed: %d press $ to use", player.speed_charms);
+            mvwprintw(backpack_win, charms_line + 3, 2, "Damage: %d press %% to use", player.damage_charms);
+
+            mvwprintw(backpack_win, 19, 2, "Active Effects:");
+            if(player.health_charm_duration > 0)
+            mvwprintw(backpack_win, 20, 2, "Health: %d turns", player.health_charm_duration);
+            if(player.speed_charm_duration > 0)
+            mvwprintw(backpack_win, 21, 2, "Speed: %d turns", player.speed_charm_duration);
+            if(player.damage_charm_duration > 0)
+            mvwprintw(backpack_win, 22, 2, "Damage: %d turns", player.damage_charm_duration);
+
             wrefresh(backpack_win);
         }
 
@@ -2156,6 +2183,51 @@ void throw_weapon(Weapon *wp, int direction) {
     }
 }
 
+void activate_charm(Player *p, char ch) {
+    switch(ch) {
+        case '&':
+            if(p->health_charms > 0) {
+                p->health_charms--;
+                p->health_charm_duration = 20;
+            }
+            break;
+            
+        case '$':
+            if(p->speed_charms > 0) {
+                p->speed_charms--;
+                p->speed_charm_duration = 20;
+            }
+            break;
+            
+        case '%':
+            if(p->damage_charms > 0 && p->current_weapon) {
+                p->damage_charms--;
+                p->damage_charm_duration = 20;
+                p->original_damage = p->current_weapon->damage;
+                p->current_weapon->damage *= 2;
+            }
+            break;
+    }
+}
+
+void update_charms(Player *p) {
+
+    if(p->health_charm_duration > 0) {
+        p->hp += 2;
+        p->health_charm_duration--;
+    }
+    
+    if(p->speed_charm_duration > 0) {
+        p->speed_charm_duration--;
+    }
+    
+    if(p->damage_charm_duration > 0) {
+        p->damage_charm_duration--;
+        if(p->damage_charm_duration == 0 && p->current_weapon) {
+            p->current_weapon->damage = p->original_damage;
+        }
+    }
+}
 
 void discover_current_room(int px, int py) {
     for (int i = 0; i < current_map.room_count; i++) {
