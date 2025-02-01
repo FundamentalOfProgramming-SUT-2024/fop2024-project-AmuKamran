@@ -15,6 +15,8 @@
 #define MESSAGE_LENGTH 100
 #define MAX_MONSTERS 6
 #define MAX_WEAPONS 6
+#define MAX_THROWN_WEAPONS 10
+#define MAX_CHARMS 4
 
 typedef struct {
     char username[50];
@@ -69,6 +71,11 @@ typedef struct {
 } Weapon;
 
 typedef struct {
+    char type; 
+    int x, y;
+} Charm;
+
+typedef struct {
     char tiles[MAP_HEIGHT][MAP_WIDTH];
     bool discovered[MAP_HEIGHT][MAP_WIDTH];
     Room rooms[MAX_ROOMS];
@@ -82,6 +89,10 @@ typedef struct {
     monster monsters[MAX_MONSTERS];
     int weapon_count;
     Weapon weapons[MAX_WEAPONS];
+    Weapon thrown_weapons[MAX_THROWN_WEAPONS];
+    int thrown_weapon_count;
+    Charm charms[MAX_CHARMS];
+    int charm_count;
 } Map;
 
 typedef struct {
@@ -96,6 +107,9 @@ typedef struct {
     Weapon *current_weapon;
     Weapon *weapons[10];
     int weapon_count;
+    int health_charms;
+    int speed_charms;
+    int damage_charms;
 } Player;
 
 
@@ -115,6 +129,7 @@ Player player;
 monster monsters[MAX_MONSTERS];
 int monster_count;
 bool hited = false;
+bool a_monster_has_been_killed = false;
 
 // تابع‌های کمکی
 int get_input(char *buffer, int max_len);
@@ -149,6 +164,7 @@ void display_message(const char *format, ...);
 
 Room* find_room_for_monster(int x, int y);
 void move_monsters();
+void throw_weapon(Weapon *wp, int direction);
 
 int main() {
     setlocale(LC_ALL,"");
@@ -1287,7 +1303,7 @@ void generate_map(bool keep_dimensions) {
                 break;
         }
         
-        // پیدا کردن موقعیت مناسب
+
         int attempts = 0;
         do {
             Room room = current_map.rooms[rand() % current_map.room_count];
@@ -1301,6 +1317,33 @@ void generate_map(bool keep_dimensions) {
             current_map.tiles[wp.y][wp.x] = wp.type; 
         }
     }
+
+    int min_charms = 2, max_charms = 4;
+    int num_charms = rand() % (max_charms - min_charms + 1) + min_charms;
+    current_map.charm_count = 0;
+
+    for(int i=0; i<num_charms; i++) {
+            Charm ch;
+            int r = rand() % 3;
+            switch(r) {
+                case 0: ch.type = '&'; break; 
+                case 1: ch.type = '$'; break; 
+                case 2: ch.type = '%'; break; 
+            }
+            
+        int attempts = 0;
+        do {
+            Room room = current_map.rooms[rand() % current_map.room_count];
+            ch.x = room.x + 1 + rand() % (room.width - 2);
+            ch.y = room.y + 1 + rand() % (room.height - 2);
+            attempts++;
+        } while(!is_valid_weapon_position(ch.x, ch.y) && attempts < 100);
+
+        if(attempts < 100) {
+            current_map.charms[current_map.charm_count++] = ch;
+            current_map.tiles[ch.y][ch.x] = ch.type;
+        }
+    }
 }
 
 
@@ -1311,7 +1354,6 @@ void draw_map() {
                 char tile = current_map.tiles[y][x];
                 bool is_cursed_wall = false;
 
-                // Check if it's a cursed room wall
                 if (x >= current_map.cursed_room.x && 
                     x < current_map.cursed_room.x + current_map.cursed_room.width &&
                     y >= current_map.cursed_room.y && 
@@ -1323,19 +1365,18 @@ void draw_map() {
                                      y == current_map.cursed_room.y + current_map.cursed_room.height - 1);
                 }
 
-                // Draw walls first
                 if (tile == '#') {
                     if (is_cursed_wall) {
-                        attron(COLOR_PAIR(6)); // Purple for cursed walls
+                        attron(COLOR_PAIR(6)); 
                     } else {
-                        attron(COLOR_PAIR(1)); // Default wall color
+                        attron(COLOR_PAIR(1)); 
                     }
                     mvaddch(y+2, x, '#');
                     attroff(COLOR_PAIR(3) | COLOR_PAIR(1));
                 }
                 // Handle other tiles
                 else {
-                    // Check for monsters
+                   
                     if (tile == 'D' || tile == 'F' || tile == 'A' || tile == 'S' || tile == 'U') {
                         for (int m = 0; m < current_map.monster_count; m++) {
                             if (current_map.monsters[m].x == x && 
@@ -1347,7 +1388,18 @@ void draw_map() {
                                 break;
                             }
                         }
-                    } else if (tile == 'd'){
+                    } else if (tile == '$'){
+                        mvprintw(y+2,x,"\U000026A1");
+                        x++;
+                    } else if (tile == '&'){
+                        mvprintw(y+2,x,"\U0001FA78");
+                        x++;
+                    } else if (tile == '%'){
+                        mvprintw(y+2,x,"\U0001F4A5");
+                        x++;
+                    }
+                    
+                    else if (tile == 'd'){
                         mvprintw(y+2,x,"\U0001F5E1");
                         x++;
                     } else if (tile == 'w'){
@@ -1401,7 +1453,6 @@ Weapon get_weapon_by_char(char c) {
 }
 
 void add_weapon_to_player(Player *p, Weapon w) {
-
     for(int i=0; i<p->weapon_count; i++) {
         if(p->weapons[i]->type == w.type) {
             p->weapons[i]->ammo += w.ammo;
@@ -1415,6 +1466,13 @@ void add_weapon_to_player(Player *p, Weapon w) {
     }
 }
 
+void add_charm_to_player(Player *p, char type) {
+    switch(type) {
+        case '&': p->health_charms++; break;
+        case '$': p->speed_charms++; break;
+        case '%': p->damage_charms++; break;
+    }
+}
 
 
 void game_play() {
@@ -1426,9 +1484,9 @@ void game_play() {
     noecho();
     keypad(stdscr, TRUE);
     start_color();
-    init_pair(1, COLOR_WHITE, COLOR_BLACK); // رنگ پیش‌فرض
-    init_pair(2, COLOR_RED, COLOR_BLACK);   // برای تله‌ها
-    init_pair(3, COLOR_GREEN, COLOR_BLACK); // برای درها
+    init_pair(1, COLOR_WHITE, COLOR_BLACK); 
+    init_pair(2, COLOR_RED, COLOR_BLACK);  
+    init_pair(3, COLOR_GREEN, COLOR_BLACK); 
 
     generate_map(false);
     player.x = current_map.rooms[0].x + 1;
@@ -1487,7 +1545,7 @@ void game_play() {
                                     display_message("Can't use two weapons at the same time!");
                                 }
                             }
-                            // حالت ۲: دستان شما خالی است (هیچ اسلحه‌ای در دست ندارید)
+                       
                             else {
                                 bool found = false;
                                 for (int i = 0; i < player.weapon_count; i++) {
@@ -1542,6 +1600,33 @@ void game_play() {
                 speed_mode = false;
                 break;
             case 'P': pick = !pick; break;
+            case ' ': 
+            if (player.current_weapon && player.current_weapon->throwable) {
+                
+                attron(COLOR_PAIR(3));
+                mvprintw(30, 0, "Select direction (w/a/s/d): ");
+                refresh();
+                int dir = getch();
+                
+                int direction;
+                switch(dir) {
+                    case 'w': direction = 0; break; // بالا
+                    case 's': direction = 1; break; // پایین
+                    case 'a': direction = 2; break; // چپ
+                    case 'd': direction = 3; break; // راست
+                    default: 
+                        mvprintw(30, 0, "Invalid direction!          ");
+                        continue;
+                }
+                
+    
+                throw_weapon(player.current_weapon, direction);
+                mvprintw(30, 0, "                             ");
+            } else {
+                attron(COLOR_PAIR(2));
+                mvprintw(30, 0, "No throwable weapon equipped!");
+            }
+            break;
         }
 
         bool in_cursed_room = (player.x >= current_map.cursed_room.x &&
@@ -1710,6 +1795,17 @@ void game_play() {
                         current_map.battle_gate_y = '*';
                     }
 
+                    for (int i = 0; i < current_map.thrown_weapon_count; i++) {
+                        Weapon *wp = &current_map.thrown_weapons[i];
+                        if (wp->x == new_x && wp->y == new_y) {
+                            add_weapon_to_player(&player,*wp);
+                            current_map.tiles[new_y][new_x] = '.';
+                            current_map.thrown_weapon_count--;
+                            current_map.thrown_weapons[i] = current_map.thrown_weapons[current_map.thrown_weapon_count];
+                            break;
+                        }
+                    }
+
                     if (current_map.tiles[new_y][new_x] == '.') {
                         for (int step = 1; step <= 3; step++) {
                             int next_step_x = player.x + (dx * step);
@@ -1730,7 +1826,7 @@ void game_play() {
                         char weapon_char = current_map.tiles[new_y][new_x];
                         Weapon w = get_weapon_by_char(weapon_char);
                         add_weapon_to_player(&player, w);
-                        current_map.tiles[new_y][new_x] = '.';
+                        current_map.tiles[new_y][new_x] = '*';
                         display_message("                        ");
                         int message_line = map_display_height + 2;
                         mvprintw(message_line, 0, "> %s", last_message);
@@ -1747,6 +1843,21 @@ void game_play() {
                         display_message("Gold!!!");
                         player.gold++;
                         current_map.tiles[new_y][new_x] = '.';
+                    }
+
+                     if ((current_map.tiles[new_y][new_x] == '&' || 
+                        current_map.tiles[new_y][new_x] == '$' || 
+                        current_map.tiles[new_y][new_x] == '%') && pick) {
+                        
+                        for(int i=0; i<current_map.charm_count; i++) {
+                            if(current_map.charms[i].x == new_x && current_map.charms[i].y == new_y) {
+                                add_charm_to_player(&player, current_map.charms[i].type);
+                                current_map.tiles[new_y][new_x] = '*';
+                                current_map.charms[i] = current_map.charms[current_map.charm_count - 1];
+                                current_map.charm_count--;
+                                break;
+                            }
+                        }
                     }
 
                     if (current_map.tiles[player.y][player.x] == 'G' && pick) {
@@ -1791,6 +1902,13 @@ void game_play() {
         mvprintw(0, 0, "Level:1  HP:%d  Hunger:%d%%  Gold:%d  Keys:%d", 
                 player.hp, player.hunger, player.gold, player.keys);
         mvprintw(1, 0, "Press 'm' to toggle map | TAB for backpack | 'q' to quit");
+       
+       
+        if (a_monster_has_been_killed){
+        clear();
+        display_message("You killed the monster!!!");
+        a_monster_has_been_killed = false;
+        }
 
         int message_line = map_display_height + 2;
         mvprintw(message_line, 0, "> %s", last_message);
@@ -1842,6 +1960,11 @@ void game_play() {
                 ); j++;
                 }
             }
+            int charms_line = 12 + j; 
+            mvwprintw(backpack_win, charms_line, 2, "Charms:");
+            mvwprintw(backpack_win, charms_line + 1, 2, "Health: %d", player.health_charms);
+            mvwprintw(backpack_win, charms_line + 2, 2, "Speed: %d", player.speed_charms);
+            mvwprintw(backpack_win, charms_line + 3, 2, "Damage: %d", player.damage_charms);
             wrefresh(backpack_win);
         }
 
@@ -1937,7 +2060,14 @@ void move_monsters() {
             if (new_x == player.x && new_y == player.y) {
                 player.hp -= m->power;
                 hited = true;
-            
+                if (player.current_weapon->range == 0)
+                m->hp -= player.current_weapon->damage;
+                if (m-> hp <= 0){
+                m->alive = false;
+                a_monster_has_been_killed = true;
+                }
+                if (!m->alive)
+                current_map.tiles[m->y][m->x] = '*';
             } else {
                 // حرکت هیولا
                 current_map.tiles[m->y][m->x] = m->tile_beneath;
@@ -1952,8 +2082,81 @@ void move_monsters() {
     }
 }
 
+void throw_weapon(Weapon *wp, int direction) {
+    if (wp->ammo <= 0 || wp->range == 0) return;
 
-// اضافه کردن این تابع برای بررسی اتاق فعلی بازیکن و کشف آن
+    int dx = 0, dy = 0;
+    switch(direction) {
+        case 0: dy = -1; break; // بالا
+        case 1: dy = 1; break;  // پایین
+        case 2: dx = -1; break; // چپ
+        case 3: dx = 1; break;  // راست
+        default: return;
+    }
+
+    int x = player.x;
+    int y = player.y;
+    int steps = 0;
+
+    while (steps < wp->range) {
+        x += dx;
+        y += dy;
+
+
+        if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) break;
+
+  
+        if (current_map.tiles[y][x] == '#') break;
+
+        // بررسی برخورد با هیولا
+        bool hit_monster = false;
+        for (int i = 0; i < current_map.monster_count; i++) {
+            monster *m = &current_map.monsters[i];
+            if (m->alive && m->x == x && m->y == y) {
+                m->hp -= wp->damage;
+                if (m->hp <= 0) {
+                    m->alive = false;
+                    a_monster_has_been_killed = true;
+                    current_map.tiles[y][x] = m->tile_beneath;
+                }
+                hit_monster = true;
+                break;
+            }
+        }
+        if (hit_monster) {
+            int map_display_height = MAP_HEIGHT + 2;
+            display_message("You hit monster by a throwable weapon!!!");
+            int message_line = map_display_height + 2;
+            mvprintw(message_line, 0, "> %s", last_message);
+            wp->ammo--;
+            return;
+        }
+
+        steps++;
+    }
+
+
+    if (steps < wp->range) {
+        x -= dx;
+        y -= dy;
+    }
+
+    if (current_map.tiles[y][x] == '.' || current_map.tiles[y][x] == '*') {
+        Weapon thrown = *wp;
+        thrown.x = x;
+        thrown.y = y;
+        thrown.ammo = 1;
+        current_map.thrown_weapons[current_map.thrown_weapon_count++] = thrown;
+        current_map.tiles[y][x] = thrown.type;
+    }
+
+    wp->ammo--;
+    if (wp->ammo <= 0) {
+        player.current_weapon = NULL;
+    }
+}
+
+
 void discover_current_room(int px, int py) {
     for (int i = 0; i < current_map.room_count; i++) {
         Room r = current_map.rooms[i];
