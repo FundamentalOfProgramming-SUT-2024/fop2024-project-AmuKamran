@@ -1,3 +1,4 @@
+/* Kamran Karimi */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -10,6 +11,7 @@
 #include<ncursesw/ncurses.h>
 
 #define USERS_FILE "/home/cumrun/rogue_game/users/users.txt"
+#define SAVE_FILE "/home/cumrun/rogue_game/users/save.txt"
 #define MAX_USERS 100
 #define MAX_MESSAGES 5
 #define MESSAGE_LENGTH 100
@@ -140,8 +142,9 @@ bool a_monster_has_been_killed = false;
 int floors_count = 1;
 bool is_hard_mode = false;
 bool change_hero_color = false;
+bool resume_game = false;
 
-// تابع‌های کمکی
+
 int get_input(char *buffer, int max_len);
 void display_menu();
 bool is_valid_password(const char *password, char errors[][100], int *error_count);
@@ -178,6 +181,8 @@ void throw_weapon(Weapon *wp, int direction);
 void activate_charm(Player *p, char ch);
 void update_charms(Player *p);
 void end_game(Player *player);
+void save_game();
+int load_game();
 
 int main() {
     setlocale(LC_ALL,"");
@@ -194,6 +199,7 @@ int main() {
     init_pair(11, COLOR_CYAN, COLOR_BLACK);
     init_pair(1, COLOR_YELLOW, COLOR_BLACK); 
     init_pair(5, COLOR_RED, COLOR_BLACK); 
+    init_pair(12, COLOR_GREEN, COLOR_BLACK);
     load_users();
     display_menu();
     endwin();
@@ -316,19 +322,14 @@ void generate_random_password(char *password, int length) {
     const char lowercase[] = "abcdefghijklmnopqrstuvwxyz";
     const char uppercase[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const char digits[] = "0123456789";
-    
-    // اطمینان از وجود حداقل یک کاراکتر از هر نوع
     password[0] = lowercase[rand() % (sizeof(lowercase) - 1)];
     password[1] = uppercase[rand() % (sizeof(uppercase) - 1)];
     password[2] = digits[rand() % (sizeof(digits) - 1)];
 
-    // پر کردن بقیه کاراکترها
     const char all_chars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     for (int i = 3; i < length; i++) {
         password[i] = all_chars[rand() % (sizeof(all_chars) - 1)];
     }
-
-    // به هم ریختن ترتیب کاراکترها
     for (int i = 0; i < length; i++) {
         int j = rand() % length;
         char temp = password[i];
@@ -390,7 +391,7 @@ void register_user() {
         move(rows / 2 + 4, (cols - strlen("Enter Password: ")) / 2 + strlen("Enter Password: "));
         int input_result = get_input(password, sizeof(password));
     
-        if (input_result == -1) { // اگر کاربر Tab زده
+        if (input_result == -1) { 
             generate_random_password(password, 10);
             mvprintw(rows / 2 + 4, (cols - strlen("Enter Password: ")) / 2 + strlen("Enter Password: "), 
                "%s", password);
@@ -508,7 +509,7 @@ void start_game() {
                 game_play();
                 return;
             case 2:
-                login_user(); // فراخوانی تابع لاگین
+                login_user();
                 return;
             case 3:
                 register_user();
@@ -601,7 +602,6 @@ void login_user() {
             napms(1500);
             return;
         }
-
         if (strlen(password) == 0) {
             clear();
             mvprintw(rows / 2, (cols - strlen("Password cannot be empty.")) / 2, "Password cannot be empty.");
@@ -645,12 +645,9 @@ void login_user() {
 void setting_menu() {
     int choice;
     int rows, cols;
-    
     while(1) {
         clear();
         getmaxyx(stdscr, rows, cols);
-        
-
         char difficulty[20];
         strcpy(difficulty, is_hard_mode ? "Hard" : "Easy");
         
@@ -710,8 +707,6 @@ void display_profile() {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     clear();
-
-
     mvprintw(0, (cols - strlen("===== Profile =====")) / 2, "===== Profile =====");
 
 
@@ -751,29 +746,37 @@ void pre_game_menu() {
         char input[10];
         move(rows / 2 + 5, (cols - strlen("Enter your choice (ESC to exit): ")) / 2 + strlen("Enter your choice (ESC to exit): "));
         
-        // اگر کاربر ESC بزند، به منوی اصلی برگرد
         if (!get_input(input, sizeof(input))) {
-            return; // خروج از تابع و بازگشت به منوی اصلی
+            return;
         }
         
         choice = atoi(input);
         switch (choice) {
             case 1:
+                for (int i = 0; i < player.weapon_count; i++) {
+                    free(player.weapons[i]);
+                }
+                player.weapon_count = 0;
+                remove(SAVE_FILE);
                 clear();
                 game_play();
-                return;
             case 2:
-                clear();
-                mvprintw(rows / 2, (cols - strlen("Resume Game selected. Logic to be implemented.")) / 2, "Resume Game selected. Logic to be implemented.");
-                refresh();
-                napms(2000);
-                return;
+                if (load_game()) {
+                    clear();
+                    resume_game = true;
+                    game_play();
+                } else {
+                    mvprintw(rows/2, (cols - strlen("No saved game found.")) / 2, "No saved game found.");
+                    refresh();
+                    napms(2000);
+                }
+                break;
             case 3:
                 clear();
                 setting_menu();
                 break;
             case 4:
-                display_scoreboard(); // نمایش جدول امتیازات
+                display_scoreboard(); 
                 return;
             case 5:
                 display_profile();
@@ -899,15 +902,12 @@ void display_scoreboard() {
 
     mvprintw(rows - 2, 5, "Press ESC to return...");
     refresh();
-
     int ch;
     while ((ch = getch()) != 27 && ch != '\n') {}
-
     pre_game_menu();
 }
 
 void init_map() {
-    // ایجاد نقشه خالی با دیوارها
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             current_map.tiles[y][x] = '#';
@@ -919,12 +919,9 @@ void init_map() {
 }
 
 bool can_place_room(Room room) {
-    // بررسی اندازه اتاق
     if (room.width < ROOM_MIN_SIZE || room.height < ROOM_MIN_SIZE) {
         return false;
     }
-    
-    // بررسی تداخل با اتاق‌های موجود
     for (int i = 0; i < current_map.room_count; i++) {
         Room existing = current_map.rooms[i];
         if (room.x < existing.x + existing.width + 2 &&
@@ -959,8 +956,6 @@ void place_door(Room *room) {
     int directions[4][2] = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};
     int best_door_x = -1, best_door_y = -1;
     int min_adjacent_doors = INT_MAX;
-
-    // بررسی تمام جهات برای یافتن بهترین مکان در
     for (int d = 0; d < 4; d++) {
         int dx = directions[d][0];
         int dy = directions[d][1];
@@ -968,11 +963,10 @@ void place_door(Room *room) {
         int door_x = room->x + (dx == 0 ? room->width / 2 : (dx == 1 ? room->width - 1 : 0));
         int door_y = room->y + (dy == 0 ? room->height / 2 : (dy == 1 ? room->height - 1 : 0));
 
-        // بررسی مرزهای نقشه
+
         if (door_x <= 0 || door_x >= MAP_WIDTH-1 || door_y <= 0 || door_y >= MAP_HEIGHT-1)
             continue;
 
-        // شمارش درهای مجاور
         int adjacent_doors = 0;
         for (int y = door_y - 1; y <= door_y + 1; y++) {
             for (int x = door_x - 1; x <= door_x + 1; x++) {
@@ -981,41 +975,31 @@ void place_door(Room *room) {
                 }
             }
         }
-
-        // انتخاب مکانی با کمترین درهای مجاور
         if (adjacent_doors < min_adjacent_doors) {
             min_adjacent_doors = adjacent_doors;
             best_door_x = door_x;
             best_door_y = door_y;
         }
     }
-
-    // قرار دادن در اگر مکانی مناسب پیدا شد
     if (best_door_x != -1 && best_door_y != -1) {
         current_map.tiles[best_door_y][best_door_x] = '.';
     }
 }
 
 bool is_valid_weapon_position(int x, int y) {
-    // بررسی مرزهای نقشه
     if (x < 0 || x + 1 >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
         return false;
     }
-    
-    // بررسی اینکه هر دو خانه کف اتاق باشند
     if (current_map.tiles[y][x] != '*' || current_map.tiles[y][x + 1] != '*') {
         return false;
     }
-    
-    // بررسی تداخل با سایر اسلحه‌ها
+
     for (int i = 0; i < current_map.weapon_count; i++) {
         Weapon wp = current_map.weapons[i];
         if ((wp.x == x || wp.x == x + 1) && wp.y == y) {
             return false;
         }
     }
-    
-    // بررسی تداخل با پله، تله و سایر موجودیت‌ها
     if ((x == current_map.stairs_x && y == current_map.stairs_y) ||
         (x + 1 == current_map.stairs_x && y == current_map.stairs_y)) {
         return false;
@@ -1029,13 +1013,11 @@ bool is_valid_weapon_position(int x, int y) {
     return true;
 }
 
-
 void generate_map(bool keep_dimensions) { 
     init_map();
     current_map.room_count = 0;
     srand(time(NULL));
 
-    // اگر نیاز به حفظ ابعاد اتاق قبلی داریم
     if(keep_dimensions && current_map.prev_room_width > 0) {
         Room first_room;
         first_room.width = current_map.prev_room_width;
@@ -1126,7 +1108,6 @@ void generate_map(bool keep_dimensions) {
         }
     }
     
-    // تولید اتاق‌ها
     int attempts = 0;
     int num_room = rand() % (4) + 6;
     while (current_map.room_count < num_room && attempts < 1000) {
@@ -1149,7 +1130,6 @@ void generate_map(bool keep_dimensions) {
         room.width = ROOM_MIN_SIZE + rand() % (ROOM_MAX_SIZE - ROOM_MIN_SIZE + 1);
         room.height = ROOM_MIN_SIZE + rand() % (ROOM_MAX_SIZE - ROOM_MIN_SIZE + 1);
         
-        // محاسبه موقعیت با احتساب اندازه اتاق
         room.x = 1 + rand() % (MAP_WIDTH - room.width - 2);
         room.y = 1 + rand() % (MAP_HEIGHT - room.height - 2);
         room.discovered = false;
@@ -1180,11 +1160,9 @@ void generate_map(bool keep_dimensions) {
         }
     }
 
- // ایجاد آرایه برای الگوریتم MST
+
     int connections[MAX_ROOMS] = {0};
     int costs[MAX_ROOMS][MAX_ROOMS] = {0};
-
-    // محاسبه هزینه اتصالات
     for (int i = 0; i < current_map.room_count; i++) {
         for (int j = i+1; j < current_map.room_count; j++) {
             int x1 = current_map.rooms[i].x + current_map.rooms[i].width/2;
@@ -1195,8 +1173,6 @@ void generate_map(bool keep_dimensions) {
             costs[i][j] = abs(x1 - x2) + abs(y1 - y2);
         }
     }
-
-    // الگوریتم Prim با راهروهای پیچیده
     int selected[MAX_ROOMS] = {0};
     selected[0] = 1;
     
@@ -1225,20 +1201,15 @@ void generate_map(bool keep_dimensions) {
             int y1 = prev.y + prev.height/2;
             int x2 = current.x + current.width/2;
             int y2 = current.y + current.height/2;
-            
-            // ایجاد راهرو پیچدرپیچ
             create_winding_corridor(x1, y1, x2, y2);
             place_door(&prev);
             place_door(&current);
         }
     }
-
-    // قرار دادن درهای اضافی برای اتاق‌های بدون در
     for (int i = 0; i < current_map.room_count; i++) {
         Room *room = &current_map.rooms[i];
         bool has_door = false;
         
-        // بررسی وجود در در اتاق
         for (int y = room->y; y < room->y + room->height; y++) {
             for (int x = room->x; x < room->x + room->width; x++) {
                 if (current_map.tiles[y][x] == '.') {
@@ -1249,31 +1220,28 @@ void generate_map(bool keep_dimensions) {
             if (has_door) break;
         }
         
-        // اگر اتاق در نداشت، یک در اضافه کنید
         if (!has_door) {
-            int wall = rand() % 4; // انتخاب تصادفی یک دیوار
+            int wall = rand() % 4; 
             int door_x, door_y;
             
             switch(wall) {
-                case 0: // بالایی
+                case 0: 
                     door_x = room->x + 1 + rand() % (room->width - 2);
                     door_y = room->y;
                     break;
-                case 1: // پایینی
+                case 1:
                     door_x = room->x + 1 + rand() % (room->width - 2);
                     door_y = room->y + room->height - 1;
                     break;
-                case 2: // چپ
+                case 2: 
                     door_x = room->x;
                     door_y = room->y + 1 + rand() % (room->height - 2);
                     break;
-                case 3: // راست
+                case 3:
                     door_x = room->x + room->width - 1;
                     door_y = room->y + 1 + rand() % (room->height - 2);
                     break;
             }
-            
-            // بررسی مجاورت با درهای دیگر
             bool safe = true;
             for (int y = door_y - 1; y <= door_y + 1; y++) {
                 for (int x = door_x - 1; x <= door_x + 1; x++) {
@@ -1289,7 +1257,6 @@ void generate_map(bool keep_dimensions) {
             
             if (safe) {
                 current_map.tiles[door_y][door_x] = '.';
-                // ایجاد راهرو به صورت تصادفی
                 int dir = rand() % 4;
                 int dx[] = {0, 0, -1, 1};
                 int dy[] = {-1, 1, 0, 0};
@@ -1362,7 +1329,6 @@ void generate_map(bool keep_dimensions) {
 
     num_monsters = (num_monsters > valid_room_count) ? valid_room_count : num_monsters;
 
-    // مخلوط کردن لیست اتاقها
     for (int i = 0; i < valid_room_count; i++) {
         int j = rand() % valid_room_count;
         int temp = valid_rooms[i];
@@ -1385,7 +1351,6 @@ void generate_map(bool keep_dimensions) {
             
             if (current_map.tiles[my][mx] == '*') {
                 char monster_type = monster_chars[rand() % 5];
-            
                 monster m;
                 m.x = mx;
                 m.y = my;
@@ -1428,7 +1393,6 @@ void generate_map(bool keep_dimensions) {
             attempts++;
         }
     }
-
     int min_weapons = 4, max_weapons = 6;
     int num_weapons = rand() % (max_weapons - min_weapons + 1) + min_weapons;
     
@@ -1438,28 +1402,28 @@ void generate_map(bool keep_dimensions) {
         Weapon wp;
         int r = rand() % 4;
         switch(r) {
-            case 0: // خنجر
+            case 0:
                 wp.type = 'd';
                 wp.damage = 3;
                 wp.throwable = true;
                 wp.ammo = 1;
                 wp.range = 10; 
                 break;
-            case 1: // چوب جادو
+            case 1: 
                 wp.type = 'w';
                 wp.damage = 4;
                 wp.throwable = true;
                 wp.ammo = 3;
                 wp.range = 10; 
                 break;
-            case 2: // تیر معمولی
+            case 2:
                 wp.type = 'a';
                 wp.damage = 2;
                 wp.throwable = true;
                 wp.ammo = 5;
                 wp.range = 10; 
                 break;
-            case 3: // شمشیر
+            case 3: 
                 wp.type = 's';
                 wp.damage = 6;
                 wp.throwable = false;
@@ -1467,8 +1431,7 @@ void generate_map(bool keep_dimensions) {
                 wp.range = 10; 
                 break;
         }
-        
-
+    
         int attempts = 0;
         do {
             Room room = current_map.rooms[rand() % current_map.room_count];
@@ -1482,7 +1445,6 @@ void generate_map(bool keep_dimensions) {
             current_map.tiles[wp.y][wp.x] = wp.type; 
         }
     }
-
     int min_charms = 2, max_charms = 4;
     int num_charms = rand() % (max_charms - min_charms + 1) + min_charms;
     current_map.charm_count = 0;
@@ -1606,9 +1568,9 @@ void draw_map() {
                         mvprintw(y+2,x,"\U0001F35E");
                         x++;
                     } else {
-                        attron(COLOR_PAIR(1)); // Default color
+                        attron(COLOR_PAIR(4)); // Default color
                         mvaddch(y+2, x, tile);
-                        attroff(COLOR_PAIR(1));
+                        attroff(COLOR_PAIR(4));
                     }
                 }
             }
@@ -1624,7 +1586,6 @@ void display_message(const char *format, ...) {
     last_msg_time = time(NULL);
 }
 
-// ============Game_Play============
 bool is_weapon_tile(char c) {
     return c == 'd' || c == 'w' || c == 'a' || c == 's';
 }
@@ -1665,9 +1626,6 @@ void game_play() {
     noecho();
     keypad(stdscr, TRUE);
     start_color();
-    init_pair(1, COLOR_WHITE, COLOR_BLACK); 
-    init_pair(2, COLOR_RED, COLOR_BLACK);  
-    init_pair(3, COLOR_GREEN, COLOR_BLACK); 
 
     generate_map(false);
     player.x = current_map.rooms[0].x + 1;
@@ -1692,7 +1650,8 @@ void game_play() {
     bool velocity_mode = false;
     bool pick = false;
     WINDOW *backpack_win;
-
+    if (resume_game)
+    load_game();
     int map_width = MAP_WIDTH;
     int map_height = MAP_HEIGHT;
 
@@ -1705,6 +1664,7 @@ void game_play() {
     int ch;
     while (ch = getch()) {
             if (ch == 'q'){
+                save_game();
                 floors_count = 1;
                 break;
             }
@@ -1986,7 +1946,6 @@ void game_play() {
                         player.y = (player.y < new_room.y + 1) ? new_room.y + 1 : (player.y > new_room.y + new_room.height - 2) ? new_room.y + new_room.height - 2 : player.y;
                     }
 
-                    // چک دروازه نبرد در حرکت عادی
                     if (player.x == current_map.battle_gate_x && player.y == current_map.battle_gate_y) {
                         player.hp -= 10;
                         current_map.battle_gate_x = '*';
@@ -2182,14 +2141,42 @@ void game_play() {
             wrefresh(backpack_win);
         }
         if(!change_hero_color)
-        attron(COLOR_PAIR(3));
+        attron(COLOR_PAIR(12));
         else attron(COLOR_PAIR(11));
         mvaddch(player.y + 2, player.x, '@');
         if(!change_hero_color)
-        attroff(COLOR_PAIR(3));
+        attroff(COLOR_PAIR(12));
         else attroff(COLOR_PAIR(11));
         discover_current_room(player.x, player.y);
         refresh();
+        if (player.hp <= 0){
+            int rows, cols;
+            getmaxyx(stdscr, rows, cols);
+            clear();
+            refresh();
+            mvprintw(rows/2 - 1, (cols - strlen("Game over")) / 2, "Game over");
+            mvprintw(rows/2 + 1, (cols - strlen("Gold Collected: %d")) / 2, "Gold Collected: %d", player.gold);
+            refresh();
+            napms(5000);
+            if (strlen(logged_in_user) > 0) {
+                for (int i = 0; i < user_count; i++) {
+                    if (strcmp(users[i].username, logged_in_user) == 0) {
+                        users[i].gold += player.gold;
+                        users[i].games_played++; 
+                        users[i].last_played_time = time(NULL); 
+                        save_users();
+                        for (int j = 0; j < strlen(logged_in_user); j++){
+                            logged_in_user[j] = '\0';
+                        }
+                        floors_count = 1;
+                        is_hard_mode = false;
+                        change_hero_color = false;
+                        break;
+                    }
+                }
+            }
+            break;
+        }
     }
     delwin(backpack_win);
     endwin();
@@ -2209,7 +2196,7 @@ Room* find_room_for_monster(int x, int y) {
 void move_monsters() {
     Room *player_room = find_room_for_monster(player.x, player.y);
     if (!player_room) {
-        return; // بازیکن در راهرو است، هیولاها حرکت نمی‌کنند
+        return;
     }
 
     for (int i = 0; i < current_map.monster_count; i++) {
@@ -2220,7 +2207,7 @@ void move_monsters() {
 
         Room *monster_room = find_room_for_monster(m->x, m->y);
         if (monster_room != player_room) {
-            continue; // هیولا در اتاق دیگری است، حرکت نمی‌کند
+            continue; 
         }
 
         int best_dx = 0, best_dy = 0;
@@ -2233,20 +2220,14 @@ void move_monsters() {
             int dy = directions[j][1];
             int new_x = m->x + dx;
             int new_y = m->y + dy;
-
-            // بررسی محدوده اتاق
             if (new_x < monster_room->x || new_x >= monster_room->x + monster_room->width ||
                 new_y < monster_room->y || new_y >= monster_room->y + monster_room->height) {
-                continue; // خارج از اتاق
+                continue;
             }
-
-            // بررسی نوع سلول مقصد
             char tile = current_map.tiles[new_y][new_x];
             if (tile != '*' && tile != '.') {
-                continue; // غیر قابل عبور
+                continue; 
             }
-
-            // بررسی وجود هیولای دیگر در مقصد
             bool occupied = false;
             for (int k = 0; k < current_map.monster_count; k++) {
                 if (k != i && current_map.monsters[k].alive &&
@@ -2258,8 +2239,6 @@ void move_monsters() {
             if (occupied) {
                 continue;
             }
-
-            // بررسی فاصله جدید
             int new_distance = abs(new_x - player.x) + abs(new_y - player.y);
             if (new_distance < min_distance) {
                 min_distance = new_distance;
@@ -2271,12 +2250,10 @@ void move_monsters() {
         if (best_dx != 0 || best_dy != 0) {
             int new_x = m->x + best_dx;
             int new_y = m->y + best_dy;
-
-            // برخورد با بازیکن
             if (new_x == player.x && new_y == player.y) {
                 player.hp -= m->power;
                 hited = true;
-                if (player.current_weapon->range == 0)
+                if (player.current_weapon && player.current_weapon->range == 0)
                 m->hp -= player.current_weapon->damage;
                 if (m-> hp <= 0){
                 m->alive = false;
@@ -2285,7 +2262,6 @@ void move_monsters() {
                 if (!m->alive)
                 current_map.tiles[m->y][m->x] = '*';
             } else {
-                // حرکت هیولا
                 current_map.tiles[m->y][m->x] = m->tile_beneath;
                 m->x = new_x;
                 m->y = new_y;
@@ -2303,28 +2279,22 @@ void throw_weapon(Weapon *wp, int direction) {
 
     int dx = 0, dy = 0;
     switch(direction) {
-        case 0: dy = -1; break; // بالا
-        case 1: dy = 1; break;  // پایین
-        case 2: dx = -1; break; // چپ
-        case 3: dx = 1; break;  // راست
+        case 0: dy = -1; break; 
+        case 1: dy = 1; break;  
+        case 2: dx = -1; break;
+        case 3: dx = 1; break;  
         default: return;
     }
 
     int x = player.x;
     int y = player.y;
     int steps = 0;
-
     while (steps < wp->range) {
         x += dx;
         y += dy;
 
-
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) break;
-
-  
         if (current_map.tiles[y][x] == '#') break;
-
-        // بررسی برخورد با هیولا
         bool hit_monster = false;
         for (int i = 0; i < current_map.monster_count; i++) {
             monster *m = &current_map.monsters[i];
@@ -2350,13 +2320,10 @@ void throw_weapon(Weapon *wp, int direction) {
 
         steps++;
     }
-
-
     if (steps < wp->range) {
         x -= dx;
         y -= dy;
     }
-
     if (current_map.tiles[y][x] == '.' || current_map.tiles[y][x] == '*') {
         Weapon thrown = *wp;
         thrown.x = x;
@@ -2380,14 +2347,12 @@ void activate_charm(Player *p, char ch) {
                 p->health_charm_duration = 20;
             }
             break;
-            
         case '$':
             if(p->speed_charms > 0) {
                 p->speed_charms--;
                 p->speed_charm_duration = 20;
             }
             break;
-            
         case '%':
             if(p->damage_charms > 0 && p->current_weapon) {
                 p->damage_charms--;
@@ -2428,7 +2393,7 @@ void end_game(Player *player) {
     mvprintw(rows/2 - 1, (cols - strlen("Your Score: 100")) / 2, "Your Score: 100");
     mvprintw(rows/2, (cols - strlen("Gold Collected: %d")) / 2, "Gold Collected: %d", player->gold);
     refresh();
-    napms(10000); 
+    napms(8000); 
 
     if (strlen(logged_in_user) > 0) {
         for (int i = 0; i < user_count; i++) {
@@ -2447,21 +2412,91 @@ void end_game(Player *player) {
     }
 }
 
+void save_game() {
+    FILE *file = fopen(SAVE_FILE, "w");
+    if (!file) {
+        return;
+    }
+
+    fprintf(file, "%s\n", logged_in_user);
+    fprintf(file, "%d %d %d %d %d %d %d\n", player.gold, player.food, player.hp, player.hunger,
+            player.health_charms, player.speed_charms, player.damage_charms);
+    fprintf(file, "%d %d %d\n", player.health_charm_duration, player.speed_charm_duration, player.damage_charm_duration);
+    fprintf(file, "%d\n", floors_count);
+    fprintf(file, "%d\n", player.weapon_count);
+    for (int i = 0; i < player.weapon_count; i++) {
+        Weapon *w = player.weapons[i];
+        fprintf(file, "%c %d %d %d %d\n", w->type, w->damage, w->throwable, w->ammo, w->range);
+    }
+    int current_index = -1;
+    for (int i = 0; i < player.weapon_count; i++) {
+        if (player.weapons[i] == player.current_weapon) {
+            current_index = i;
+            break;
+        }
+    }
+    fprintf(file, "%d\n", current_index);
+
+    fclose(file);
+}
+
+int load_game() {
+    FILE *file = fopen(SAVE_FILE, "r");
+    if (!file) {
+        return 0;
+    }
+
+    char saved_user[50];
+    fscanf(file, "%49s\n", saved_user);
+    if (strcmp(saved_user, logged_in_user) != 0) {
+        fclose(file);
+        return 0;
+    }
+
+    fscanf(file, "%d %d %d %d %d %d %d\n", &player.gold, &player.food, &player.hp, &player.hunger,
+           &player.health_charms, &player.speed_charms, &player.damage_charms);
+    fscanf(file, "%d %d %d\n", &player.health_charm_duration, &player.speed_charm_duration, &player.damage_charm_duration);
+    fscanf(file, "%d\n", &floors_count);
+
+    int weapon_count;
+    fscanf(file, "%d\n", &weapon_count);
+    player.weapon_count = weapon_count;
+
+    for (int i = 0; i < weapon_count; i++) {
+        char type;
+        int damage, throwable, ammo, range;
+        fscanf(file, " %c %d %d %d %d\n", &type, &damage, &throwable, &ammo, &range);
+        Weapon *w = malloc(sizeof(Weapon));
+        w->type = type;
+        w->damage = damage;
+        w->throwable = throwable;
+        w->ammo = ammo;
+        w->range = range;
+        player.weapons[i] = w;
+    }
+    int current_index;
+    fscanf(file, "%d\n", &current_index);
+    if (current_index >= 0 && current_index < player.weapon_count) {
+        player.current_weapon = player.weapons[current_index];
+    } else {
+        player.current_weapon = &default_weapon;
+    }
+
+    fclose(file);
+    return 1;
+}
+
 void discover_current_room(int px, int py) {
     for (int i = 0; i < current_map.room_count; i++) {
         Room r = current_map.rooms[i];
-        // بررسی آیا بازیکن در این اتاق است
         if (px >= r.x && px < r.x + r.width &&
             py >= r.y && py < r.y + r.height) {
-            
-            // کشف تمام تایل‌های اتاق
             for (int y = r.y; y < r.y + r.height; y++) {
                 for (int x = r.x; x < r.x + r.width; x++) {
                     current_map.discovered[y][x] = true;
                 }
             }
             
-            // کشف درهای اطراف اتاق
             for (int y = r.y - 1; y <= r.y + r.height; y++) {
                 for (int x = r.x - 1; x <= r.x + r.width; x++) {
                     if (current_map.tiles[y][x] == '+') {
@@ -2480,7 +2515,7 @@ void create_winding_corridor(int x1, int y1, int x2, int y2) {
         int steps_since_turn = 0;
         
         while (current_x != x2 || current_y != y2) {
-            // 60% احتمال حرکت به سمت هدف پس از 3 قدم مستقیم
+
             if ((rand() % 100 < 60 || steps_since_turn > 3) && 
                 (current_x != x2 || current_y != y2)) {
                 
@@ -2491,7 +2526,6 @@ void create_winding_corridor(int x1, int y1, int x2, int y2) {
                 }
                 steps_since_turn++;
             } else {
-                // تغییر جهت تصادفی
                 int dir = rand() % 4;
                 switch(dir) {
                     case 0: if (current_x < MAP_WIDTH-2) current_x++; break;
@@ -2501,14 +2535,11 @@ void create_winding_corridor(int x1, int y1, int x2, int y2) {
                 }
                 steps_since_turn = 0;
             }
-            
-            // ایجاد راهرو با دیوارهای جانبی
+        
             if (current_map.tiles[current_y][current_x] == '#') {
                 current_map.tiles[current_y][current_x] = '.';
                 add_corridor_walls(current_x, current_y);
             }
-            
-            // ایجاد انشعابات تصادفی
             if (rand() % 100 < 5) {
                 create_random_branch(current_x, current_y);
             }
