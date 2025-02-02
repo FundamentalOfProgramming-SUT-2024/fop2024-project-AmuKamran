@@ -138,6 +138,8 @@ int monster_count;
 bool hited = false;
 bool a_monster_has_been_killed = false;
 int floors_count = 1;
+bool is_hard_mode = false;
+bool change_hero_color = false;
 
 // تابع‌های کمکی
 int get_input(char *buffer, int max_len);
@@ -189,6 +191,7 @@ int main() {
     init_pair(2, COLOR_CYAN, COLOR_BLACK); 
     init_pair(3, COLOR_RED, COLOR_BLACK);    
     init_pair(10, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(11, COLOR_CYAN, COLOR_BLACK);
     init_pair(1, COLOR_YELLOW, COLOR_BLACK); 
     init_pair(5, COLOR_RED, COLOR_BLACK); 
     load_users();
@@ -616,7 +619,7 @@ void login_user() {
                 for (int i = 0; i < user_count; i++) {
                     if (strcmp(users[i].username, username) == 0) {
                         users[i].last_played_time = time(NULL);
-                        save_users(); // ذخیره تغییرات
+                        save_users(); 
                         break;
                     }
                 }
@@ -639,17 +642,108 @@ void login_user() {
     }
 }
 
+void setting_menu() {
+    int choice;
+    int rows, cols;
+    
+    while(1) {
+        clear();
+        getmaxyx(stdscr, rows, cols);
+        
+
+        char difficulty[20];
+        strcpy(difficulty, is_hard_mode ? "Hard" : "Easy");
+        
+        char color[20];
+        strcpy(color, change_hero_color ? "Cyan" : "Green");
+        
+
+        mvprintw(rows/2 - 4, (cols - strlen("===== Settings ====="))/2, "===== Settings =====");
+        mvprintw(rows/2 - 2, (cols - strlen("1. Toggle Difficulty (Current: %s)") - strlen(difficulty))/2, "1. Toggle Difficulty (Current: %s)", difficulty);
+        mvprintw(rows/2 - 1, (cols - strlen("2. Toggle Player Color (Current: %s)") - strlen(color))/2, "2. Toggle Player Color (Current: %s)", color);
+        mvprintw(rows/2 + 1, (cols - strlen("3. Return to Pre-Game Menu"))/2, "3. Return to Pre-Game Menu");
+        mvprintw(rows/2 + 3, (cols - strlen("===================="))/2, "====================");
+        mvprintw(rows/2 + 5, (cols - strlen("Enter choice: "))/2, "Enter choice: ");
+        refresh();
+        
+        char input[10];
+        move(rows/2 + 5, (cols - strlen("Enter choice: "))/2 + strlen("Enter choice: "));
+        
+        if (!get_input(input, sizeof(input))) {
+            return;
+        }
+        
+        choice = atoi(input);
+        switch(choice) {
+            case 1:
+                is_hard_mode = !is_hard_mode;
+                break;
+            case 2:
+                change_hero_color = !change_hero_color;
+                break;
+            case 3:
+                return;
+            default:
+                mvprintw(rows/2 + 7, (cols - strlen("Invalid choice!"))/2, "Invalid choice!");
+                refresh();
+                napms(1500);
+        }
+    }
+}
+
+void display_profile() {
+    load_users(); 
+    User *current_user = NULL;
+
+  
+    for (int i = 0; i < user_count; i++) {
+        if (strcmp(users[i].username, logged_in_user) == 0) {
+            current_user = &users[i];
+            break;
+        }
+    }
+
+    if (!current_user) {
+        return;
+    }
+
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
+    clear();
+
+
+    mvprintw(0, (cols - strlen("===== Profile =====")) / 2, "===== Profile =====");
+
+
+    mvprintw(2, 5, "Username: %s", current_user->username);
+    mvprintw(3, 5, "Password: %s", current_user->password); 
+    mvprintw(4, 5, "Games Played: %d", current_user->games_played);
+    mvprintw(5, 5, "Gold: %d", current_user->gold);
+
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M", localtime(&current_user->last_played_time));
+    mvprintw(6, 5, "Last Played: %s", time_str);
+
+    mvprintw(rows - 2, 5, "Press ESC to return...");
+    refresh();
+    int ch;
+    while ((ch = getch()) != 27 && ch != '\n') {}
+
+    pre_game_menu();
+}
+
 void pre_game_menu() {
     int choice;
     int rows, cols;
     while (1) {
         clear();
         getmaxyx(stdscr, rows, cols);
-        mvprintw(rows / 2 - 4, (cols - strlen("===== Pre-Game Menu =====")) / 2, "===== Pre-Game Menu =====");
-        mvprintw(rows / 2 - 2, (cols - strlen("1. New Game")) / 2, "1. New Game");
-        mvprintw(rows / 2 - 1, (cols - strlen("2. Resume Game")) / 2, "2. Resume Game");
-        mvprintw(rows / 2, (cols - strlen("3. Setting")) / 2, "3. Setting");
-        mvprintw(rows / 2 + 1, (cols - strlen("4. Scoreboard")) / 2, "4. Scoreboard");
+        mvprintw(rows / 2 - 5, (cols - strlen("===== Pre-Game Menu =====")) / 2, "===== Pre-Game Menu =====");
+        mvprintw(rows / 2 - 3, (cols - strlen("1. New Game")) / 2, "1. New Game");
+        mvprintw(rows / 2 - 2, (cols - strlen("2. Resume Game")) / 2, "2. Resume Game");
+        mvprintw(rows / 2 -1, (cols - strlen("3. Setting")) / 2, "3. Setting");
+        mvprintw(rows / 2 , (cols - strlen("4. Scoreboard")) / 2, "4. Scoreboard");
+        mvprintw(rows/2 + 1, (cols - strlen("5. Profile"))/2, "5. Profile");
         mvprintw(rows / 2 + 3, (cols - strlen("======================")) / 2, "======================");
         mvprintw(rows / 2 + 5, (cols - strlen("Enter your choice (ESC to exit): ")) / 2, "Enter your choice (ESC to exit): ");
         refresh();
@@ -676,13 +770,14 @@ void pre_game_menu() {
                 return;
             case 3:
                 clear();
-                mvprintw(rows / 2, (cols - strlen("Setting selected. Logic to be implemented.")) / 2, "Setting selected. Logic to be implemented.");
-                refresh();
-                napms(2000);
-                return;
+                setting_menu();
+                break;
             case 4:
                 display_scoreboard(); // نمایش جدول امتیازات
                 return;
+            case 5:
+                display_profile();
+                break;
             default:
                 clear();
                 mvprintw(rows / 2, (cols - strlen("Invalid choice. Please try again.")) / 2, "Invalid choice. Please try again.");
@@ -811,8 +906,6 @@ void display_scoreboard() {
     pre_game_menu();
 }
 
-
-// توابع کمکی برای تولید نقشه
 void init_map() {
     // ایجاد نقشه خالی با دیوارها
     for (int y = 0; y < MAP_HEIGHT; y++) {
@@ -1301,27 +1394,27 @@ void generate_map(bool keep_dimensions) {
                   
                 switch(monster_type) {
                     case 'D':
-                        m.hp = 5;
+                        m.hp = (is_hard_mode) ? 10 : 5;
                         m.power = 5;
                         m.follow_steps = 50;
                         break;
                     case 'F':
-                        m.hp = 10;
+                        m.hp = (is_hard_mode) ? 20 : 10;
                         m.power = 10;
                         m.follow_steps = 30;
                         break;
                     case 'A':
-                        m.hp = 15;
+                        m.hp = (is_hard_mode) ? 30 : 15;
                         m.power = 15;
                         m.follow_steps = 100;
                         break;
                     case 'S':
-                        m.hp = 20;
+                        m.hp = (is_hard_mode) ? 40 : 20;
                         m.power = 20;
                         m.follow_steps = 1000;
                         break;
                     case 'U':
-                        m.hp = 30;
+                        m.hp = (is_hard_mode) ? 60 : 30;
                         m.power = 30;
                         m.follow_steps = 100;
                         break;
@@ -1583,7 +1676,7 @@ void game_play() {
     player.gold = 0;
     player.keys = 0;
     player.food = 0;
-    player.hunger = 100;
+    player.hunger = (is_hard_mode) ? 100 : 200;
     player.current_weapon = &default_weapon;
     player.weapon_count = 0;
     player.last_heal_time = time(NULL);
@@ -1610,9 +1703,9 @@ void game_play() {
     int map_display_height = MAP_HEIGHT + 2;
     backpack_win = newwin(win_height, win_width, start_y, start_x);
     int ch;
-   while (ch = getch()) {
+    while (ch = getch()) {
             if (ch == 'q'){
-                floors_count = 0;
+                floors_count = 1;
                 break;
             }
             wclear(backpack_win);
@@ -1626,7 +1719,7 @@ void game_play() {
                         if (player.food > 0) {
                             player.food--;
                             player.hunger += 30;
-                            if (player.hunger > 100)
+                            if (player.hunger > 100 && is_hard_mode)
                             player.hunger = 100;
                         }
                         break;
@@ -2088,11 +2181,13 @@ void game_play() {
 
             wrefresh(backpack_win);
         }
-
+        if(!change_hero_color)
         attron(COLOR_PAIR(3));
+        else attron(COLOR_PAIR(11));
         mvaddch(player.y + 2, player.x, '@');
+        if(!change_hero_color)
         attroff(COLOR_PAIR(3));
-
+        else attroff(COLOR_PAIR(11));
         discover_current_room(player.x, player.y);
         refresh();
     }
@@ -2324,6 +2419,8 @@ void update_charms(Player *p) {
 }
 
 void end_game(Player *player) {
+    is_hard_mode = false;
+    change_hero_color = false;
     int rows, cols;
     clear();
     getmaxyx(stdscr, rows, cols);
