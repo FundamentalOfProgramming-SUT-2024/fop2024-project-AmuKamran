@@ -137,7 +137,7 @@ monster monsters[MAX_MONSTERS];
 int monster_count;
 bool hited = false;
 bool a_monster_has_been_killed = false;
-int floors_count = 3;
+int floors_count = 1;
 
 // تابع‌های کمکی
 int get_input(char *buffer, int max_len);
@@ -175,6 +175,7 @@ void move_monsters();
 void throw_weapon(Weapon *wp, int direction);
 void activate_charm(Player *p, char ch);
 void update_charms(Player *p);
+void end_game(Player *player);
 
 int main() {
     setlocale(LC_ALL,"");
@@ -190,7 +191,7 @@ int main() {
     init_pair(10, COLOR_YELLOW, COLOR_BLACK);
     init_pair(1, COLOR_YELLOW, COLOR_BLACK); 
     init_pair(5, COLOR_RED, COLOR_BLACK); 
-    load_users(); // بارگذاری کاربران در شروع برنامه
+    load_users();
     display_menu();
     endwin();
     return 0;
@@ -527,7 +528,6 @@ void login_user() {
     time_t stored_last_played_time;
     bool user_found = false;
 
-    // درخواست نام کاربری
     while (1) {
         clear();
         getmaxyx(stdscr, rows, cols);
@@ -552,7 +552,6 @@ void login_user() {
             continue;
         }
 
-        // بررسی وجود نام کاربری در فایل
         FILE *fp = fopen(USERS_FILE, "r");
         if (fp == NULL) {
             clear();
@@ -584,7 +583,6 @@ void login_user() {
         break;
     }
 
-    // درخواست رمز عبور
     while (1) {
         clear();
         getmaxyx(stdscr, rows, cols);
@@ -609,12 +607,9 @@ void login_user() {
             continue;
         }
 
-        // بررسی رمز عبور
         if (strcmp(stored_password, password) == 0) {
-            // موفقیت در لاگین
             strcpy(logged_in_user, username);
 
-            // به‌روزرسانی زمان آخرین بازی
             FILE *fp = fopen(USERS_FILE, "r+");
             if (fp != NULL) {
                 fseek(fp, 0, SEEK_SET);
@@ -632,7 +627,7 @@ void login_user() {
             mvprintw(rows / 2, (cols - strlen("Login successful! Redirecting to pre-game menu...")) / 2, "Login successful! Redirecting to pre-game menu...");
             refresh();
             napms(2000);
-            pre_game_menu(); // انتقال به منوی قبل از بازی
+            pre_game_menu(); 
             return;
         } else {
             clear();
@@ -643,8 +638,6 @@ void login_user() {
         }
     }
 }
-
-
 
 void pre_game_menu() {
     int choice;
@@ -760,70 +753,58 @@ void display_scoreboard() {
 
     mvprintw(0, (cols - strlen("===== Scoreboard =====")) / 2, "===== Scoreboard =====");
 
-    // نمایش هدر جدول
     mvprintw(2, 5, "Rank");
     mvprintw(2, 20, "Username");
     mvprintw(2, 40, "Score");
     mvprintw(2, 55, "Gold");
     mvprintw(2, 65, "Last Played");
-    mvprintw(2, 85, "Title"); // ستون جدید برای عنوان
+    mvprintw(2, 85, "Title");
 
     for (int i = 0; i < user_count; i++) {
         int y = 4 + i;
+        int current_color = 0;
+        bool is_logged_user = (strcmp(users[i].username, logged_in_user) == 0);
 
-        // رنگ‌آمیزی برای سه رتبه برتر
         if (i < 3) {
             attron(COLOR_PAIR(i + 1));
+            current_color = i + 1;
         }
 
-        // نمایش رتبه
         mvprintw(y, 5, "%d", i + 1);
 
-        // نمایش نام کاربری
-        if (strcmp(users[i].username, logged_in_user) == 0) {
-            attron(A_BOLD);
+        move(y, 20);
+        if (is_logged_user) attron(A_BOLD);
+        
+        if (i < 3) {
+            const char* medals[] = {"🥇", "🥈", "🥉"};
+            printw("%s %s", users[i].username, medals[i]);
+        } else {
+            printw("%s", users[i].username);
         }
-        mvprintw(y, 20, "%s", users[i].username);
-        if (strcmp(users[i].username, logged_in_user) == 0) {
-            attroff(A_BOLD);
-        }
+        
+        if (is_logged_user) attroff(A_BOLD);
 
-        // نمایش امتیاز و طلا
         mvprintw(y, 40, "%d", users[i].score);
         mvprintw(y, 55, "%d", users[i].gold);
 
-        // نمایش زمان آخرین بازی
         char time_str[20];
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M", localtime(&users[i].last_played_time));
         mvprintw(y, 65, "%s", time_str);
 
-        // نمایش عنوان برای سه رتبه برتر
-        if (i == 0) {
-            mvprintw(y, 85, "Legend");
-        } else if (i == 1) {
-            mvprintw(y, 85, "Master");
-        } else if (i == 2) {
-            mvprintw(y, 85, "Pro");
-        }
-        if (i < 3) {
-        attron(COLOR_PAIR(i + 1));
-        const char* medals[] = {" 🥇", " 🥈", " 🥉"};
-        mvprintw(y, 20, "%s%s", users[i].username, medals[i]);
-        attroff(COLOR_PAIR(i + 1));
-        } else {
-        mvprintw(y, 20, "%s", users[i].username);
-        }
+        const char* title = "";
+        if (i == 0) title = "Legend";
+        else if (i == 1) title = "Master";
+        else if (i == 2) title = "Pro";
+        mvprintw(y, 85, "%s", title);
 
-        // بازنشانی رنگ‌ها
-        if (i < 3) {
-            attroff(COLOR_PAIR(i + 1));
+        if (current_color > 0) {
+            attroff(COLOR_PAIR(current_color));
         }
     }
 
     mvprintw(rows - 2, 5, "Press ESC to return...");
     refresh();
 
-    // منتظر فشار دادن کلید ESC
     int ch;
     while ((ch = getch()) != 27 && ch != '\n') {}
 
@@ -2007,6 +1988,12 @@ void game_play() {
                         }
                     }
 
+                    if (current_map.tiles[new_y][new_x] == 'K'){
+                        floors_count = 1;
+                        end_game(&player);
+                        return;
+                    }
+
                     if (dx != 0 || dy != 0) {
                         player.hunger--;
                         if (player.hunger <= 0) {
@@ -2332,6 +2319,33 @@ void update_charms(Player *p) {
         p->damage_charm_duration--;
         if(p->damage_charm_duration == 0 && p->current_weapon) {
             p->current_weapon->damage = p->original_damage;
+        }
+    }
+}
+
+void end_game(Player *player) {
+    int rows, cols;
+    clear();
+    getmaxyx(stdscr, rows, cols);
+    mvprintw(rows/2 - 2, (cols - strlen("Congratulations! You found the treasure!")) / 2, "Congratulations! You found the treasure!");
+    mvprintw(rows/2 - 1, (cols - strlen("Your Score: 100")) / 2, "Your Score: 100");
+    mvprintw(rows/2, (cols - strlen("Gold Collected: %d")) / 2, "Gold Collected: %d", player->gold);
+    refresh();
+    napms(10000); 
+
+    if (strlen(logged_in_user) > 0) {
+        for (int i = 0; i < user_count; i++) {
+            if (strcmp(users[i].username, logged_in_user) == 0) {
+                users[i].gold += player->gold; 
+                users[i].score += 100; 
+                users[i].games_played++; 
+                users[i].last_played_time = time(NULL); 
+                save_users();
+                for (int j = 0; j < strlen(logged_in_user); j++){
+                    logged_in_user[j] = '\0';
+                }
+                break;
+            }
         }
     }
 }
